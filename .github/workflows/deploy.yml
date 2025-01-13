@@ -20,3 +20,4 @@ jobs:
           port: ${{ secrets.PORT }}
           key: ${{ secrets.SSHKEY }}
           script: "cd /home/ardas/herbalbackend/mlm-backendv1 && ./.scripts/deploy.sh"
+ 
