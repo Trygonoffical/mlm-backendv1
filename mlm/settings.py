@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-c0%h0nvj=pe7%6=!2$)!3$dj3#sykbb4axg@)_jo#cg$xp#@%z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['195.35.20.31']
+ALLOWED_HOSTS = ['195.35.20.31' , 'herbalapi.trygon.tech']
 
 
 # Application definition
