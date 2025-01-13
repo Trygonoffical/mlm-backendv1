@@ -6,7 +6,8 @@ from django.core.validators import EmailValidator, MinValueValidator, MaxValueVa
 from django.utils import timezone
 from decimal import Decimal
 from django.core.validators import RegexValidator
-
+from django.utils import timezone
+from datetime import timedelta
 class CustomUserManager(BaseUserManager):
     def create_user(self, username, password=None, **extra_fields):
         if not username:
@@ -53,10 +54,33 @@ class PhoneOTP(models.Model):
     otp = models.CharField(max_length=6)
     created_at = models.DateTimeField(auto_now_add=True)
     is_verified = models.BooleanField(default=False)
-    count = models.IntegerField(default=0)  # Number of OTP sent
+    count = models.IntegerField(default=0)
+    last_attempt = models.DateTimeField(auto_now=True)  # Add this field
     
-    class Meta:
-        db_table = 'phone_otps'
+    def is_blocked(self):
+        """Check if phone number is blocked due to too many attempts"""
+        if self.count >= 5:
+            # Calculate time since last attempt
+            time_elapsed = timezone.now() - self.last_attempt
+            # Block for 30 minutes after 5 attempts
+            return time_elapsed < timedelta(minutes=30)
+        return False
+
+    def reset_if_expired(self):
+        """Reset count if block period has expired"""
+        if self.count >= 5:
+            time_elapsed = timezone.now() - self.last_attempt
+            if time_elapsed >= timedelta(minutes=30):
+                self.count = 0
+                self.save()
+    # phone_number = models.CharField(max_length=17)
+    # otp = models.CharField(max_length=6)
+    # created_at = models.DateTimeField(auto_now_add=True)
+    # is_verified = models.BooleanField(default=False)
+    # count = models.IntegerField(default=0)  # Number of OTP sent
+    
+    # class Meta:
+    #     db_table = 'phone_otps'
 
 # Products 
 class Product(models.Model):

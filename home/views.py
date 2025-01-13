@@ -79,9 +79,9 @@ class UserLoginView(views.APIView):
 
     def get_dashboard_url(self, role):
         dashboard_urls = {
-            'CUSTOMER': '/customer/dashboard',
+            'CUSTOMER': '/account',
             'MEMBER': '/member/dashboard',
             'ASSOCIATE': '/associate/dashboard',
             'ADMIN': '/admin/dashboard'
         }
-        return dashboard_urls.get(role, '/customer/dashboard')
+        return dashboard_urls.get(role, '/account')
