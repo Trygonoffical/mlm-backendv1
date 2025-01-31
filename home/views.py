@@ -9,7 +9,12 @@ from rest_framework.permissions import AllowAny
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 import random
-from .models import PhoneOTP , User
+from .models import PhoneOTP , User , HomeSlider
+
+
+
+
+
 # Create your views here.
 
 @api_view(['GET'])
@@ -85,3 +90,6 @@ class UserLoginView(views.APIView):
             'ADMIN': '/admin/dashboard'
         }
         return dashboard_urls.get(role, '/account')
+
+
+

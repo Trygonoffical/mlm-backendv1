@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 import os
+from datetime import timedelta 
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -25,8 +26,23 @@ SECRET_KEY = 'django-insecure-c0%h0nvj=pe7%6=!2$)!3$dj3#sykbb4axg@)_jo#cg$xp#@%z
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['195.35.20.31' , 'herbalapi.trygon.tech' , '127.0.0.1']
+ALLOWED_HOSTS = [
+    '195.35.20.31' ,
+    'herbalapi.trygon.tech' , 
+    '127.0.0.1' , 
+    '127.0.0.1:3002' , 
+    'http://localhost' , 
+    'http://localhost:3002'
+    ]
 
+CORS_ALLOW_METHODS = [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+]
 
 # Application definition
 
@@ -37,8 +53,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'corsheaders',
     'rest_framework',
-     'corsheaders',
     'rest_framework_simplejwt',
     'home',
     'appAuth',
@@ -133,10 +149,12 @@ USE_TZ = True
 
 # STATIC_URL = 'static/'
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [
-    BASE_DIR / "static",
-]
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# STATICFILES_DIRS = [
+#     BASE_DIR / "static",
+# ]
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')  # or your preferred path
 # STATICFILES_DIRS = [
 #     os.path.join(BASE_DIR, 'static')
@@ -159,9 +177,17 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+        
     )
 }
 
 # Optional: Configure CORS if needed
 CORS_ALLOW_ALL_ORIGINS = True  # For development only
 CORS_ALLOW_CREDENTIALS = True
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=6),  # Extended from 5 minutes
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),  # Extended from 1 day
+    'ROTATE_REFRESH_TOKENS': True,  # Issues new refresh token on refresh
+    'BLACKLIST_AFTER_ROTATION': True,  # Important for security
+}
