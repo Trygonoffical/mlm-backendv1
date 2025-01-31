@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType
+from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu
 from appAuth.serializers import UserSerializer
 from django.db import IntegrityError
 from django.db.models import Sum, Avg, Count, Min, Max
@@ -722,4 +722,21 @@ class HomeSectionSerializer(serializers.ModelSerializer):
         elif instance.section_type != value:  # Updating instance
             if HomeSection.objects.filter(section_type=value).exists():
                 raise serializers.ValidationError(f'A section with type {value} already exists.')
+        return value
+
+class MenuSerializer(serializers.ModelSerializer):
+    category_details = CategorySerializer(source='category', read_only=True)
+    category_name = serializers.CharField(source='category.name', read_only=True)
+
+    class Meta:
+        model = Menu
+        fields = [
+            'id', 'category', 'category_details', 'category_name',
+            'position', 'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+    def validate_position(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Position cannot be negative")
         return value

@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -14,7 +14,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -417,6 +417,16 @@ class CategoryViewSet(viewsets.ModelViewSet):
         if self.request.method == 'GET':
             return [AllowAny()]
         return [IsAdminUser()]
+
+    def get_queryset(self):
+        queryset = Category.objects.all()
+
+        # Filter by Slug
+        slug = self.request.query_params.get('slug', None)
+        if slug:
+            queryset = queryset.filter(slug=slug)
+
+        return queryset
     
     def create(self, request, *args, **kwargs):
         try:
@@ -451,6 +461,22 @@ class CategoryViewSet(viewsets.ModelViewSet):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+    
+    @action(detail=True, methods=['GET'])
+    def products(self, request, pk=None):
+        """Get all products belonging to a specific category by slug"""
+        category_slug = self.request.query_params.get('slug', None)
+        
+        if category_slug:
+            category = Category.objects.filter(slug=category_slug).first()
+            if not category:
+                return Response({"error": "Category not found"}, status=404)
+            
+            products = category.products.all()  # Fetch related products
+            serializer = ProductSerializer(products, many=True)
+            return Response(serializer.data)
+        
+        return Response({"error": "Slug is required"}, status=400)
 
 
 
@@ -470,6 +496,11 @@ class ProductViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         queryset = Product.objects.all()
+
+        # Filter by Slug
+        slug = self.request.query_params.get('slug', None)
+        if slug:
+            queryset = queryset.filter(slug=slug)
 
         # Filter for trending products
         is_trending = self.request.query_params.get('trending', None)
@@ -1023,3 +1054,60 @@ class HomeSectionViewSet(viewsets.ModelViewSet):
                 for choice in HomeSectionType.choices
             ]
         })
+
+
+
+
+class MenuViewSet(viewsets.ModelViewSet):
+    queryset = Menu.objects.all()
+    serializer_class = MenuSerializer
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAdminUser()]
+
+    def get_queryset(self):
+        queryset = Menu.objects.all()
+        if self.action == 'list':
+            # Only show active menu items by default
+            is_active = self.request.query_params.get('is_active')
+            if is_active is not None:
+                queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        return queryset.order_by('position')
+
+    @action(detail=True, methods=['POST'])
+    def toggle_status(self, request, pk=None):
+        menu_item = self.get_object()
+        menu_item.is_active = not menu_item.is_active
+        menu_item.save()
+        serializer = self.get_serializer(menu_item)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['POST'])
+    def update_position(self, request, pk=None):
+        menu_item = self.get_object()
+        new_position = request.data.get('position')
+        
+        if new_position is None:
+            return Response(
+                {'detail': 'Position is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            new_position = int(new_position)
+            if new_position < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': 'Position must be a non-negative integer'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        menu_item.position = new_position
+        menu_item.save()
+        serializer = self.get_serializer(menu_item)
+        return Response(serializer.data)
