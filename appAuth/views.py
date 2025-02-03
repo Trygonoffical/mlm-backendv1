@@ -5,7 +5,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -14,7 +14,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -1111,3 +1111,27 @@ class MenuViewSet(viewsets.ModelViewSet):
         menu_item.save()
         serializer = self.get_serializer(menu_item)
         return Response(serializer.data)
+
+
+class CustomPageViewSet(viewsets.ModelViewSet):
+    queryset = CustomPage.objects.filter(is_active=True)
+    serializer_class = CustomPageSerializer
+    lookup_field = 'slug'
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [AllowAny()]
+        return [IsAdminUser()]
+
+    def get_queryset(self):
+        queryset = CustomPage.objects.filter(is_active=True)
+        location = self.request.query_params.get('location', None)
+        
+        if location == 'header':
+            queryset = queryset.filter(show_in_header=True)
+        elif location == 'footer':
+            queryset = queryset.filter(show_in_footer=True)
+            
+        return queryset.order_by('order', 'title')

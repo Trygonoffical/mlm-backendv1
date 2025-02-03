@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu
+from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage
 from appAuth.serializers import UserSerializer
 from django.db import IntegrityError
 from django.db.models import Sum, Avg, Count, Min, Max
@@ -740,3 +740,11 @@ class MenuSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("Position cannot be negative")
         return value
+
+
+class CustomPageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CustomPage
+        fields = ['id', 'title', 'slug', 'content', 'is_active', 
+                 'show_in_footer', 'show_in_header', 'order', 
+                 'created_at', 'updated_at']

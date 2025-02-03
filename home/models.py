@@ -12,7 +12,7 @@ from django.core.validators import RegexValidator
 from django.utils import timezone
 from datetime import timedelta
 from django.core.exceptions import ValidationError
-from django.db.models import Max, F
+from django.db.models import Q, Max, F
 from django.core.validators import MinLengthValidator
 
 # ------------------------ Cusom User Model Area ------------------------------------
@@ -55,7 +55,74 @@ class User(AbstractUser):
 
     class Meta:
         db_table = 'users'
+    
+    def get_active_address(self):
+        """Get the user's currently active address."""
+        return self.addresses.filter(is_active=True).first()
 
+    def set_active_address(self, address_id):
+        """Set a specific address as active."""
+        try:
+            address = self.addresses.get(id=address_id)
+            address.is_active = True
+            address.save()
+            return True
+        except Address.DoesNotExist:
+            return False
+
+    def add_address(self, address_data):
+        """Add a new address for the user."""
+        if self.role not in ['CUSTOMER', 'MLM_MEMBER']:
+            raise ValidationError("Only customers and MLM members can add addresses")
+        
+        address = Address.objects.create(
+            user=self,
+            **address_data
+        )
+        return address
+
+# --------------------------------------Mulitple Address  -----------------------------------------
+
+class Address(models.Model):
+    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='addresses')
+    name = models.CharField(max_length=100, help_text="Name for this address (e.g. Home, Office)")
+    street_address = models.CharField(max_length=255)
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    postal_code = models.CharField(max_length=10)
+    is_active = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'user_addresses'
+        verbose_name_plural = 'Addresses'
+        constraints = [
+            # Ensure only customers and MLM members can have addresses
+            models.CheckConstraint(
+                check=Q(user__role__in=['CUSTOMER', 'MLM_MEMBER']),
+                name='valid_user_role_for_address'
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        # If this address is being set as active
+        if self.is_active:
+            # Deactivate all other addresses for this user
+            Address.objects.filter(user=self.user).exclude(pk=self.pk).update(is_active=False)
+        
+        # If this is the user's first address, make it active by default
+        if not self.pk and not Address.objects.filter(user=self.user).exists():
+            self.is_active = True
+
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.user.role not in ['CUSTOMER', 'MLM_MEMBER']:
+            raise ValidationError("Only customers and MLM members can have addresses")
+
+    def __str__(self):
+        return f"{self.name} - {self.user.username}"
 
 
 # --------------------------------------Phone OTp -----------------------------------------
@@ -183,6 +250,20 @@ class ProductFeature(models.Model):
         return f"{self.product.name} - {self.title}"
     
 
+class ProductFAQ(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='faq')
+    title = models.CharField(max_length=200)
+    content = models.TextField()
+    order = models.PositiveIntegerField(default=1)
+    
+    class Meta:
+        db_table = 'product_faq'
+        ordering = ['order']
+    
+    def __str__(self):
+        return f"{self.product.name} - {self.title}"
+    
+
     
 class Customer(models.Model):
     user = models.OneToOneField(
@@ -230,9 +311,6 @@ class OrderItem(models.Model):
 
     class Meta:
         db_table = 'order_items'
-
-
-
 
 
 # ----------------------------------- MLM Member Model Area -----------------------------------------------
