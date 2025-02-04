@@ -97,13 +97,7 @@ class Address(models.Model):
     class Meta:
         db_table = 'user_addresses'
         verbose_name_plural = 'Addresses'
-        constraints = [
-            # Ensure only customers and MLM members can have addresses
-            models.CheckConstraint(
-                check=Q(user__role__in=['CUSTOMER', 'MLM_MEMBER']),
-                name='valid_user_role_for_address'
-            )
-        ]
+
 
     def save(self, *args, **kwargs):
         # If this address is being set as active
