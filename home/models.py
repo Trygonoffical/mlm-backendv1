@@ -97,7 +97,7 @@ class Address(models.Model):
     class Meta:
         db_table = 'user_addresses'
         verbose_name_plural = 'Addresses'
-
+        
 
     def save(self, *args, **kwargs):
         # If this address is being set as active
@@ -112,12 +112,11 @@ class Address(models.Model):
         super().save(*args, **kwargs)
 
     def clean(self):
-        if self.user.role not in ['CUSTOMER', 'MLM_MEMBER']:
-            raise ValidationError("Only customers and MLM members can have addresses")
+        if self.user and self.user.role not in ['CUSTOMER' 'Member']:
+            raise ValidationError("Only customers and Admin can have addresses")
 
     def __str__(self):
         return f"{self.name} - {self.user.username}"
-
 
 # --------------------------------------Phone OTp -----------------------------------------
 class PhoneOTP(models.Model):
