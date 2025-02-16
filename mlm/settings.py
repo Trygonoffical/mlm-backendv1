@@ -54,10 +54,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'corsheaders',
+    'django_filters',
     'rest_framework',
     'rest_framework_simplejwt',
-    'home',
     'appAuth',
+    'home',
 ]
 
 MIDDLEWARE = [
@@ -175,10 +176,16 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly'
     ],
+     'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         
-    )
+    ),
+    
 }
 
 # Optional: Configure CORS if needed
@@ -191,3 +198,6 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,  # Issues new refresh token on refresh
     'BLACKLIST_AFTER_ROTATION': True,  # Important for security
 }
+
+RAZORPAY_KEY_ID = 'rzp_live_P7vA9PTTBNnmO6'
+RAZORPAY_KEY_SECRET = '6Bi5vVJdKEKYsLnQKxYebBul'

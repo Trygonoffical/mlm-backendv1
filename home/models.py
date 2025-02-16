@@ -285,10 +285,14 @@ class Order(models.Model):
     status = models.CharField(max_length=20, choices=OrderStatus.choices, default=OrderStatus.PENDING)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    
     final_amount = models.DecimalField(max_digits=10, decimal_places=2)
     shipping_address = models.TextField()
     billing_address = models.TextField()
     total_bp = models.PositiveIntegerField(default=0)  # Total BP points for the order
+    razorpay_order_id = models.CharField(max_length=100, null=True, blank=True)
+    payment_id = models.CharField(max_length=100, null=True, blank=True)
+    discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
     class Meta:
         db_table = 'orders'
@@ -301,7 +305,8 @@ class OrderItem(models.Model):
     discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     final_price = models.DecimalField(max_digits=10, decimal_places=2)
     bp_points = models.PositiveIntegerField(default=0)  # BP points for this item
-
+    gst_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     class Meta:
         db_table = 'order_items'
 
@@ -348,7 +353,8 @@ class MLMMember(models.Model):
     is_active = models.BooleanField(default=True)
     join_date = models.DateTimeField(default=timezone.now)
     total_earnings = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-
+    created_at = models.DateTimeField(default=timezone.now ) 
+    updated_at = models.DateTimeField(default=timezone.now ) 
     class Meta:
         db_table = 'mlm_members'
 
@@ -428,6 +434,7 @@ class KYCDocument(models.Model):
     verification_date = models.DateTimeField(null=True, blank=True)
     rejection_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -503,6 +510,25 @@ class WalletTransaction(models.Model):
         db_table = 'wallet_transactions'
         ordering = ['-created_at']
 
+class WithdrawalRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        APPROVED = 'APPROVED', 'Approved'
+        REJECTED = 'REJECTED', 'Rejected'
+
+    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='withdrawal_requests')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'withdrawal_requests'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.wallet.user.username} - {self.amount} ({self.status})"
 
 
 
@@ -579,6 +605,27 @@ class CustomPage(models.Model):
 
     def get_absolute_url(self):
         return f"/page/{self.slug}/"
+
+# Blog page 
+class Blog(models.Model):
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=200, unique=True)
+    content = models.TextField()
+    feature_image = models.ImageField(upload_to='blogs/', blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    show_in_slider = models.BooleanField(default=False)
+    order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'blog'
+        ordering = ['order', '-created_at']
+
+    def __str__(self):
+        return self.title
+
+  
 
 class PageType(models.TextChoices):
     HOME = 'HOME', 'Home Page'
@@ -813,11 +860,18 @@ class Testimonial(models.Model):
 
 # ------------------------------ ads model -------------------------------------------------
 
+class AdvertisementPositionType(models.TextChoices):
+        SIDEBAR = 'SIDEBAR', 'Sidebar'
+        FULL_WIDTH = 'FULL_WIDTH', 'Full Width'
+        PRODUCT_PAGE = 'PRODUCT_PAGE', 'Product Page'
+        CUSTOMER_PANEL = 'CUSTOMER_PANEL', 'Customer Panel'
+        MLM_PANEL = 'MLM_PANEL', 'MLM Panel'
+
 class Advertisement(models.Model):
     title = models.CharField(max_length=200, blank=True, null=True)
     image = models.ImageField(upload_to='advertisements/')
     link = models.URLField(blank=True, null=True)
-    position = models.CharField(max_length=100, blank=True, null=True)
+    position = models.CharField(max_length=100, blank=True, null=True , choices=AdvertisementPositionType.choices, unique=True , default=AdvertisementPositionType.SIDEBAR)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -827,7 +881,8 @@ class Advertisement(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return self.title
+        return self.title or "Untitled Advertisement"
+
     
 # --------------------------------- success Stories & Customer Picks models --------------------------------------
 
@@ -967,6 +1022,7 @@ class MetaTag(models.Model):
     product = models.OneToOneField('Product', on_delete=models.CASCADE, null=True, blank=True)
     category = models.OneToOneField('Category', on_delete=models.CASCADE, null=True, blank=True)
     custom_page = models.OneToOneField(CustomPage, on_delete=models.CASCADE, null=True, blank=True)
+    blog = models.OneToOneField(Blog, on_delete=models.CASCADE, null=True, blank=True)
     is_default = models.BooleanField(default=False, help_text="Use as default meta for this page type")
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -998,7 +1054,8 @@ class MetaTag(models.Model):
         references = [
             bool(self.product),
             bool(self.category),
-            bool(self.custom_page)
+            bool(self.custom_page),
+            bool(self.blog),
         ]
         if sum(references) > 1:
             raise ValidationError("Only one reference (product, category, or custom page) can be set.")
@@ -1014,5 +1071,45 @@ class MetaTag(models.Model):
             return f"Meta for Category: {self.category.name}"
         elif self.custom_page:
             return f"Meta for Page: {self.custom_page.title}"
+        elif self.blog:
+            return f"Meta for Page: {self.blog.title}"
         else:
             return f"Default Meta for {self.get_page_type_display()}"
+        
+class Notification(models.Model):
+    NOTIFICATION_TYPES = (
+        ('GENERAL', 'General'),
+        ('INDIVIDUAL', 'Individual'),
+        ('COMMISSION', 'Commission'),
+        ('WITHDRAWAL', 'Withdrawal'),
+        ('KYC', 'KYC'),
+        ('SYSTEM', 'System')
+    )
+
+    title = models.CharField(max_length=255)
+    message = models.TextField()
+    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
+    recipient = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='notifications',
+        null=True, 
+        blank=True
+    )
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def mark_as_read(self):
+        if not self.is_read:
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save()
+
+    @property
+    def short_message(self):
+        """Returns truncated message for preview"""
+        return self.message[:100] + '...' if len(self.message) > 100 else self.message
