@@ -153,3 +153,12 @@ INFO 2025-02-19 09:52:55,730 autoreload 15233 8587937856 /Users/apple/Desktop/De
 INFO 2025-02-19 09:52:56,127 autoreload 15464 8587937856 Watching for file changes with StatReloader
 INFO 2025-02-19 09:53:41,887 autoreload 15464 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/admin.py changed, reloading.
 INFO 2025-02-19 09:53:42,243 autoreload 15514 8587937856 Watching for file changes with StatReloader
+ERROR 2025-02-19 10:10:39,546 serializers 15514 6157135872 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+INFO 2025-02-19 10:15:06,973 autoreload 15514 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/api/urls.py changed, reloading.
+INFO 2025-02-19 10:15:07,466 autoreload 16848 8587937856 Watching for file changes with StatReloader
+WARNING 2025-02-19 10:16:00,898 log 16848 6170488832 Bad Request: /api/v1/mlm/register-member/
+WARNING 2025-02-19 10:17:39,859 log 16848 6204715008 Bad Request: /api/v1/mlm/register-member/
+INFO 2025-02-19 10:21:54,909 autoreload 16848 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/serializers.py changed, reloading.
+INFO 2025-02-19 10:21:55,341 autoreload 17212 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 10:22:27,640 autoreload 17212 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/views.py changed, reloading.
+INFO 2025-02-19 10:22:27,991 autoreload 17244 8587937856 Watching for file changes with StatReloader

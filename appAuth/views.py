@@ -3298,18 +3298,38 @@ class MLMMemberRegistrationView(APIView):
             # Get current MLM member (sponsor)
             current_member = MLMMember.objects.get(user=request.user)
 
+            # Extract document related data
+            documents = request.FILES.getlist('document_file')
+            document_types = request.POST.getlist('document_types[]')
+            document_numbers = {}
+            
+            # Process document numbers from the request
+            for doc_type in ['AADHAR', 'PAN', 'BANK_STATEMENT', 'CANCELLED_CHEQUE']:
+                if doc_type in request.POST:
+                    document_numbers[doc_type] = request.POST.get(doc_type)
+
+            # Create context with document data
+            serializer_context = {
+                'document_types': document_types,
+                'document_numbers': document_numbers
+            }
+
             # Validate input data
-            serializer = MLMMemberRegistrationSerializer(data=request.data)
+            serializer = MLMMemberRegistrationSerializer(
+                data=request.POST,
+                context=serializer_context
+            )
+
             if not serializer.is_valid():
                 return Response({
                     'error': 'Invalid registration data',
                     'details': serializer.errors
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Create new user with password
+            # Create new user
             new_user = User.objects.create_user(
                 username=self.generate_unique_username(serializer.validated_data['phone_number']),
-                password=serializer.validated_data.get('password'),  # Make sure password is set
+                password=serializer.validated_data['password'],
                 phone_number=serializer.validated_data['phone_number'],
                 first_name=serializer.validated_data['first_name'],
                 last_name=serializer.validated_data.get('last_name', ''),
@@ -3325,59 +3345,35 @@ class MLMMemberRegistrationView(APIView):
                     position=self.determine_position(current_member),
                     member_id=self.generate_member_id(),
                     is_active=True,
-                    join_date=timezone.now(),
-                    created_at=timezone.now(),
-                    updated_at=timezone.now()
+                    join_date=timezone.now()
                 )
 
                 # Process KYC Documents
-                documents = request.FILES.getlist('document_file')
-                document_types = request.POST.getlist('document_types[]')
-                document_numbers = request.POST.getlist('document_number')
-
-                if not documents or not document_types:
-                    return Response({
-                        'error': 'KYC documents and document types are required'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-
-                valid_document_types = ['AADHAR', 'PAN', 'BANK_STATEMENT', 'CANCELLED_CHEQUE']
                 kyc_docs_list = []
-
-                for doc, doc_type, doc_number in zip(documents, document_types, document_numbers):
-                    if doc_type not in valid_document_types:
-                        new_user.delete()
-                        new_mlm_member.delete()
-                        return Response({
-                            'error': f'Invalid document type: {doc_type}',
-                            'valid_types': valid_document_types
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                    
+                for doc, doc_type in zip(documents, document_types):
                     try:
                         kyc_doc = KYCDocument.objects.create(
                             mlm_member=new_mlm_member,
                             document_file=doc,
                             document_type=doc_type,
-                            document_number=doc_number,
-                            status='PENDING',
-                            created_at=timezone.now()
+                            document_number=document_numbers.get(doc_type, ''),
+                            status='PENDING'
                         )
                         kyc_docs_list.append(kyc_doc)
                     except Exception as doc_error:
-                        # Clean up if document creation fails
+                        logger.error(f"Error creating KYC document: {str(doc_error)}")
+                        # Cleanup
                         new_user.delete()
                         new_mlm_member.delete()
                         for doc in kyc_docs_list:
                             doc.delete()
-                        return Response({
-                            'error': f'Failed to create KYC document: {str(doc_error)}'
-                        }, status=status.HTTP_400_BAD_REQUEST)
+                        raise Exception(f"Failed to create KYC document: {str(doc_error)}")
 
-                # Send notification to admin
+                # Create notification
                 Notification.objects.create(
                     title='New MLM Member Registration',
-                    description=f'New member {new_user.get_full_name()} registered by {current_member.user.get_full_name()}',
-                    notification_type='ADMIN',
-                    recipient=None
+                    message=f'New member {new_user.get_full_name()} registered by {current_member.user.get_full_name()}',
+                    notification_type='SYSTEM'
                 )
 
                 return Response({
@@ -3390,74 +3386,35 @@ class MLMMemberRegistrationView(APIView):
                         'email': new_user.email,
                         'phone': new_user.phone_number,
                         'sponsor': current_member.member_id,
-                        'position': new_mlm_member.position.name,
-                        'kyc_documents': [
-                            {
-                                'type': doc.document_type,
-                                'status': doc.status,
-                                'document_number': doc.document_number
-                            } for doc in kyc_docs_list
-                        ]
+                        'position': new_mlm_member.position.name
                     }
-                }, status=status.HTTP_201_CREATED)
+                })
 
             except Exception as e:
+                logger.error(f"Error in member creation: {str(e)}")
                 if 'new_user' in locals():
                     new_user.delete()
-                logger.error(f"Error in member creation: {str(e)}")
-                return Response({
-                    'error': 'Failed to create member',
-                    'details': str(e)
-                }, status=status.HTTP_400_BAD_REQUEST)
+                raise
 
         except Exception as e:
             logger.error(f"MLM Member Registration Error: {str(e)}")
             return Response({
-                'error': 'Registration failed',
-                'details': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-    
-        
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
     def generate_unique_username(self, phone_number):
-        """
-        Generate a unique username based on phone number
-        """
         base_username = f"MLM_{phone_number}"
         unique_suffix = str(uuid.uuid4())[:8]
         return f"{base_username}_{unique_suffix}"
 
     def generate_member_id(self):
-        """
-        Generate a unique MLM member ID
-        """
         while True:
-            # Generate a unique 8-character member ID
             member_id = f"MLM{random.randint(10000, 99999)}"
-            
-            # Check if the member ID is unique
             if not MLMMember.objects.filter(member_id=member_id).exists():
                 return member_id
 
     def determine_position(self, sponsor):
-        """
-        Determine the appropriate position for the new member
-        """
-        # Default to the sponsor's current position
-        # You can implement more complex logic here
         return sponsor.position
-
-    def process_kyc_documents(self, mlm_member, documents):
-        """
-        Process and save KYC documents
-        """
-        for document in documents:
-            KYCDocument.objects.create(
-                mlm_member=mlm_member,
-                document=document,
-                status='PENDING',
-                uploaded_at=timezone.now()
-            )
         
 
 

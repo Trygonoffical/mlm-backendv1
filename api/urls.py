@@ -91,7 +91,7 @@ urlpatterns = [
 
     path('admin/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
 
-    path('mlm/register-member/', MLMMemberRegistrationView.as_view(), name='mlm-member-registration'),
+#     path('mlm/register-member/', MLMMemberRegistrationView.as_view(), name='mlm-member-registration'),
 
 
 

@@ -1169,9 +1169,16 @@ class MLMMemberRegistrationSerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=15, required=True)
     email = serializers.EmailField(required=False, allow_blank=True)
     password = serializers.CharField(required=True, write_only=True)
-    document_types = serializers.ListField(child=serializers.CharField(), required=True)
-    document_number = serializers.ListField(child=serializers.CharField(), required=True)
-    
+    document_types = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True
+    )
+    document_numbers = serializers.DictField(
+        child=serializers.CharField(),
+        required=False
+    )
+
     def validate_phone_number(self, value):
         if not value.isdigit():
             raise serializers.ValidationError("Phone number must contain only digits")
@@ -1182,9 +1189,30 @@ class MLMMemberRegistrationSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value):
-        if value and User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Email is already registered")
+        if value:
+            value = value.strip().lower()
+            if User.objects.filter(email=value).exists():
+                raise serializers.ValidationError("Email is already registered")
         return value
+
+    def validate(self, data):
+        # Validate documents
+        document_types = self.context.get('document_types', [])
+        if not document_types or len(document_types) < 2:
+            raise serializers.ValidationError({
+                "document_types": "At least two documents (Aadhar and PAN) are required"
+            })
+
+        # Validate document numbers
+        document_numbers = self.context.get('document_numbers', {})
+        required_docs = ['AADHAR', 'PAN']
+        for doc_type in required_docs:
+            if doc_type not in document_numbers or not document_numbers[doc_type]:
+                raise serializers.ValidationError({
+                    "document_numbers": f"{doc_type} number is required"
+                })
+
+        return data
     
 
 
