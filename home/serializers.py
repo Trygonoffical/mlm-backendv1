@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification
+from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter
 from appAuth.serializers import UserSerializer
 from django.db import IntegrityError
 from django.db.models import Sum, Avg, Count, Min, Max
@@ -10,6 +10,9 @@ from django.db.models import F, Q , Count
 import re
 from django.utils.text import slugify
 from django.core.validators import RegexValidator
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 User = get_user_model()
@@ -764,6 +767,43 @@ class ProductListSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.image.url)
         return None
 
+# class HomeSectionSerializer(serializers.ModelSerializer):
+#     section_type_display = serializers.CharField(source='get_section_type_display', read_only=True)
+#     image_url = serializers.SerializerMethodField()
+#     products = serializers.SerializerMethodField()
+
+#     class Meta:
+#         model = HomeSection
+#         fields = [
+#             'id', 'section_type', 'section_type_display', 'title', 'subtitle',
+#             'description', 'image', 'image_url', 'is_active', 'display_order',
+#             'created_at', 'updated_at', 'products'
+#         ]
+#         read_only_fields = ['created_at', 'updated_at']
+
+#     def get_image_url(self, obj):
+#         if obj.image:
+#             request = self.context.get('request')
+#             if request:
+#                 return request.build_absolute_uri(obj.image.url)
+#         return None
+
+#     def get_products(self, obj):
+#         products = obj.get_products()
+#         return ProductListSerializer(products, many=True, context=self.context).data
+
+#     def validate_section_type(self, value):
+#         if value not in HomeSectionType.values:
+#             raise serializers.ValidationError(f"Invalid section type. Must be one of: {HomeSectionType.values}")
+#         instance = self.instance
+#         if instance is None:  # Creating new instance
+#             if HomeSection.objects.filter(section_type=value).exists():
+#                 raise serializers.ValidationError(f'A section with type {value} already exists.')
+#         elif instance.section_type != value:  # Updating instance
+#             if HomeSection.objects.filter(section_type=value).exists():
+#                 raise serializers.ValidationError(f'A section with type {value} already exists.')
+#         return value
+
 class HomeSectionSerializer(serializers.ModelSerializer):
     section_type_display = serializers.CharField(source='get_section_type_display', read_only=True)
     image_url = serializers.SerializerMethodField()
@@ -778,17 +818,46 @@ class HomeSectionSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at']
 
+
     def get_image_url(self, obj):
-        if obj.image:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.image.url)
-        return None
+        try:
+            if obj.image:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(obj.image.url)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting image URL: {str(e)}")
+            return None
 
     def get_products(self, obj):
-        products = obj.get_products()
-        return ProductListSerializer(products, many=True, context=self.context).data
+        try:
+            if not hasattr(obj, 'get_products'):
+                return []
+            products = obj.get_products()
+            return ProductListSerializer(
+                products, 
+                many=True, 
+                context=self.context
+            ).data
+        except Exception as e:
+            logger.error(f"Error getting products: {str(e)}")
+            return []
 
+    def to_representation(self, instance):
+        try:
+            data = super().to_representation(instance)
+            # Ensure image_url is properly formatted
+            if data.get('image'):
+                if not data.get('image_url'):
+                    request = self.context.get('request')
+                    if request and hasattr(instance.image, 'url'):
+                        data['image_url'] = request.build_absolute_uri(instance.image.url)
+            return data
+        except Exception as e:
+            logger.error(f"Error in to_representation: {str(e)}")
+            return {}
+        
     def validate_section_type(self, value):
         if value not in HomeSectionType.values:
             raise serializers.ValidationError(f"Invalid section type. Must be one of: {HomeSectionType.values}")
@@ -800,7 +869,7 @@ class HomeSectionSerializer(serializers.ModelSerializer):
             if HomeSection.objects.filter(section_type=value).exists():
                 raise serializers.ValidationError(f'A section with type {value} already exists.')
         return value
-
+        
 class MenuSerializer(serializers.ModelSerializer):
     category_details = CategorySerializer(source='category', read_only=True)
     category_name = serializers.CharField(source='category.name', read_only=True)
@@ -941,13 +1010,13 @@ class AddressSerializer(serializers.ModelSerializer):
 
 
 class CustomerProfileSerializer(serializers.ModelSerializer):
-    first_name = serializers.CharField(source='first_name', required=False, allow_blank=True)
-    last_name = serializers.CharField(source='last_name', required=False, allow_blank=True)
+    # first_name = serializers.CharField(source='first_name', required=False, allow_blank=True)
+    # last_name = serializers.CharField(source='last_name', required=False, allow_blank=True)
 
     
     class Meta:
         model = User
-        fields = ['id', 'first_name', 'last_name', 'email', ]
+        fields = ['id', 'first_name', 'last_name', 'email', 'phone_number', 'role']
         read_only_fields = ['id', 'phone_number']
 
     def validate_email(self, value):
@@ -1115,4 +1184,46 @@ class MLMMemberRegistrationSerializer(serializers.Serializer):
     def validate_email(self, value):
         if value and User.objects.filter(email=value).exists():
             raise serializers.ValidationError("Email is already registered")
+        return value
+    
+
+
+
+class ContactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Contact
+        fields = [
+            'id', 'name', 'email', 'phone', 
+            'subject', 'message', 'created_at'
+        ]
+        read_only_fields = ['created_at']
+
+    def validate_phone(self, value):
+        # Basic phone number validation
+        value = value.strip()
+        if not value.isdigit() or len(value) < 10:
+            raise serializers.ValidationError("Please enter a valid phone number")
+        return value
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        if not value:
+            raise serializers.ValidationError("Email is required")
+        return value
+    
+
+
+
+class NewsletterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Newsletter
+        fields = ['id', 'email', 'is_active', 'created_at']
+        read_only_fields = ['is_active', 'created_at']
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        if not value:
+            raise serializers.ValidationError("Email is required")
+        if Newsletter.objects.filter(email=value).exists():
+            raise serializers.ValidationError("This email is already subscribed")
         return value

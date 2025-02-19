@@ -199,5 +199,44 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,  # Important for security
 }
 
-RAZORPAY_KEY_ID = 'rzp_live_P7vA9PTTBNnmO6'
-RAZORPAY_KEY_SECRET = '6Bi5vVJdKEKYsLnQKxYebBul'
+RAZORPAY_KEY_ID = 'rzp_test_x05a9xxCjRkVBx'
+RAZORPAY_KEY_SECRET = '47qySM0t0VJeRl1V1xMlVcP1'
+
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': 'debug.log',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        '': {  # Root logger
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+        },
+        'home': {  # Your app name
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
+}

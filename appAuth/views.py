@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -15,7 +15,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -1052,6 +1052,65 @@ class AboutViewSet(viewsets.ModelViewSet):
         })
     
 
+# class HomeSectionViewSet(viewsets.ModelViewSet):
+#     queryset = HomeSection.objects.all()
+#     serializer_class = HomeSectionSerializer
+#     authentication_classes = [JWTAuthentication]
+#     permission_classes = [IsAuthenticated]
+
+#     def get_permissions(self):
+#         if self.request.method == 'GET':
+#             return [AllowAny()]
+#         return [IsAdminUser()]
+
+#     def get_queryset(self):
+#         queryset = HomeSection.objects.all()
+#         section_type = self.request.query_params.get('section_type', None)
+#         if section_type:
+#             queryset = queryset.filter(section_type=section_type)
+#         return queryset.order_by('display_order')
+
+#     @action(detail=True, methods=['post'])
+#     def toggle_status(self, request, pk=None):
+#         section = self.get_object()
+#         section.is_active = not section.is_active
+#         section.save()
+#         serializer = self.get_serializer(section)
+#         return Response(serializer.data)
+
+#     @action(detail=True, methods=['post'])
+#     def update_display_order(self, request, pk=None):
+#         section = self.get_object()
+#         new_order = request.data.get('display_order')
+        
+#         if new_order is None:
+#             return Response(
+#                 {'detail': 'display_order is required'},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+
+#         try:
+#             new_order = int(new_order)
+#         except (TypeError, ValueError):
+#             return Response(
+#                 {'detail': 'display_order must be a valid integer'},
+#                 status=status.HTTP_400_BAD_REQUEST
+#             )
+
+#         section.display_order = new_order
+#         section.save()
+#         serializer = self.get_serializer(section)
+#         return Response(serializer.data)
+
+#     @action(detail=False, methods=['get'])
+#     def section_types(self, request):
+#         return Response({
+#             'types': [
+#                 {'value': choice[0], 'label': choice[1]}
+#                 for choice in HomeSectionType.choices
+#             ]
+#         })
+
 class HomeSectionViewSet(viewsets.ModelViewSet):
     queryset = HomeSection.objects.all()
     serializer_class = HomeSectionSerializer
@@ -1063,13 +1122,101 @@ class HomeSectionViewSet(viewsets.ModelViewSet):
             return [AllowAny()]
         return [IsAdminUser()]
 
-    def get_queryset(self):
-        queryset = HomeSection.objects.all()
-        section_type = self.request.query_params.get('section_type', None)
-        if section_type:
-            queryset = queryset.filter(section_type=section_type)
-        return queryset.order_by('display_order')
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
 
+    def get_queryset(self):
+        try:
+            queryset = HomeSection.objects.all()
+            
+            section_type = self.request.query_params.get('section_type', None)
+            if section_type:
+                queryset = queryset.filter(section_type=section_type)
+            return queryset.order_by('display_order')
+        except Exception as e:
+            logger.error(f"Error in get_queryset: {str(e)}")
+            raise
+
+        
+    def create(self, request, *args, **kwargs):
+        try:
+            logger.info(f"Creating home section with data: {request.data}")
+            serializer = self.get_serializer(data=request.data)
+            
+            if not serializer.is_valid():
+                logger.error(f"Validation error: {serializer.errors}")
+                return Response(
+                    {'error': 'Validation failed', 'details': serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+            
+            return Response(
+                serializer.data, 
+                status=status.HTTP_201_CREATED, 
+                headers=headers
+            )
+        except Exception as e:
+            logger.error(f"Error creating home section: {str(e)}")
+            return Response(
+                {'error': 'Failed to create section', 'details': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def update(self, request, *args, **kwargs):
+        try:
+            partial = kwargs.pop('partial', False)
+            instance = self.get_object()
+            serializer = self.get_serializer(
+                instance, 
+                data=request.data, 
+                partial=partial
+            )
+            
+            if not serializer.is_valid():
+                logger.error(f"Validation error: {serializer.errors}")
+                return Response(
+                    {'error': 'Validation failed', 'details': serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            self.perform_update(serializer)
+            return Response(serializer.data)
+        except Exception as e:
+            logger.error(f"Error updating home section: {str(e)}")
+            return Response(
+                {'error': 'Failed to update section', 'details': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+    def list(self, request, *args, **kwargs):
+        try:
+            queryset = self.get_queryset()
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+        except Exception as e:
+            logger.error(f"Error in list view: {str(e)}")
+            return Response(
+                {'error': 'Internal server error'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def retrieve(self, request, *args, **kwargs):
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance)
+            return Response(serializer.data)
+        except Exception as e:
+            logger.error(f"Error in retrieve view: {str(e)}")
+            return Response(
+                {'error': 'Internal server error'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
     @action(detail=True, methods=['post'])
     def toggle_status(self, request, pk=None):
         section = self.get_object()
@@ -1110,7 +1257,6 @@ class HomeSectionViewSet(viewsets.ModelViewSet):
                 for choice in HomeSectionType.choices
             ]
         })
-
 
 
 
@@ -1548,7 +1694,8 @@ class CustomerProfileView(APIView):
                 return Response({
                     'status': 'success',
                     'message': 'Profile updated successfully',
-                    'user': CustomerProfileSerializer(user).data
+                    # 'user': CustomerProfileSerializer(user).data,
+                    'userinfo': serializer.data 
                 })
             except Exception as e:
                 return Response({
@@ -3411,4 +3558,147 @@ class DownlineListView(APIView):
             return Response({
                 'error': 'Failed to fetch downline',
                 'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class ContactViewSet(viewsets.ModelViewSet):
+    queryset = Contact.objects.all()
+    serializer_class = ContactSerializer
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [AllowAny()]
+        return [IsAdminUser()]
+
+    def create(self, request, *args, **kwargs):
+        try:
+            logger.info(f"Contact form submission: {request.data}")
+            serializer = self.get_serializer(data=request.data)
+            
+            if serializer.is_valid():
+                self.perform_create(serializer)
+                
+                # You can add email notification logic here
+                # send_notification_email(serializer.data)
+                
+                return Response({
+                    'status': 'success',
+                    'message': 'Thank you for contacting us. We will get back to you soon.'
+                }, status=status.HTTP_201_CREATED)
+            
+            logger.error(f"Contact form validation error: {serializer.errors}")
+            return Response({
+                'status': 'error',
+                'message': 'Please check your input',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            logger.error(f"Error in contact form submission: {str(e)}")
+            return Response({
+                'status': 'error',
+                'message': 'An error occurred while processing your request'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def list(self, request, *args, **kwargs):
+        try:
+            queryset = self.get_queryset()
+            
+            # Filter by read status
+            is_read = request.query_params.get('is_read')
+            if is_read is not None:
+                queryset = queryset.filter(is_read=is_read.lower() == 'true')
+
+            # Search functionality
+            search = request.query_params.get('search')
+            if search:
+                queryset = queryset.filter(
+                    Q(name__icontains=search) |
+                    Q(email__icontains=search) |
+                    Q(subject__icontains=search) |
+                    Q(message__icontains=search)
+                )
+
+            # Date range filter
+            start_date = request.query_params.get('start_date')
+            end_date = request.query_params.get('end_date')
+            if start_date:
+                queryset = queryset.filter(created_at__date__gte=start_date)
+            if end_date:
+                queryset = queryset.filter(created_at__date__lte=end_date)
+
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+
+        except Exception as e:
+            logger.error(f"Error fetching contacts: {str(e)}")
+            return Response({
+                'status': 'error',
+                'message': 'An error occurred while fetching contacts'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+
+class NewsletterViewSet(viewsets.ModelViewSet):
+    queryset = Newsletter.objects.all()
+    serializer_class = NewsletterSerializer
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [AllowAny()]
+        return [IsAdminUser()]
+
+    def create(self, request, *args, **kwargs):
+        try:
+            serializer = self.get_serializer(data=request.data)
+            if serializer.is_valid():
+                self.perform_create(serializer)
+                return Response({
+                    'status': 'success',
+                    'message': 'Thank you for subscribing to our newsletter!'
+                }, status=status.HTTP_201_CREATED)
+            
+            return Response({
+                'status': 'error',
+                'message': 'Invalid email address',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            logger.error(f"Error in newsletter subscription: {str(e)}")
+            return Response({
+                'status': 'error',
+                'message': 'An error occurred while processing your request'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def list(self, request, *args, **kwargs):
+        try:
+            queryset = self.get_queryset()
+            
+            # Filter by active status
+            is_active = request.query_params.get('is_active')
+            if is_active is not None:
+                queryset = queryset.filter(is_active=is_active.lower() == 'true')
+
+            # Search functionality
+            search = request.query_params.get('search')
+            if search:
+                queryset = queryset.filter(email__icontains=search)
+
+            # Date range filter
+            start_date = request.query_params.get('start_date')
+            end_date = request.query_params.get('end_date')
+            if start_date:
+                queryset = queryset.filter(created_at__date__gte=start_date)
+            if end_date:
+                queryset = queryset.filter(created_at__date__lte=end_date)
+
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+
+        except Exception as e:
+            logger.error(f"Error fetching newsletter subscriptions: {str(e)}")
+            return Response({
+                'status': 'error',
+                'message': 'An error occurred while fetching subscriptions'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

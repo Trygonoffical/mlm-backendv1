@@ -91,6 +91,7 @@ class Address(models.Model):
     state = models.CharField(max_length=100)
     postal_code = models.CharField(max_length=10)
     is_active = models.BooleanField(default=False)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1113,3 +1114,41 @@ class Notification(models.Model):
     def short_message(self):
         """Returns truncated message for preview"""
         return self.message[:100] + '...' if len(self.message) > 100 else self.message
+    
+
+
+
+class Contact(models.Model):
+    name = models.CharField(max_length=100)
+    email = models.EmailField()
+    phone = models.CharField(max_length=15)
+    subject = models.CharField(max_length=200)
+    message = models.TextField()
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'contacts'
+        ordering = ['-created_at']
+        verbose_name = 'Contact Query'
+        verbose_name_plural = 'Contact Queries'
+
+    def __str__(self):
+        return f"{self.name} - {self.subject} ({self.created_at.strftime('%Y-%m-%d')})"
+    
+
+class Newsletter(models.Model):
+    email = models.EmailField(unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'newsletters'
+        ordering = ['-created_at']
+        verbose_name = 'Newsletter Subscription'
+        verbose_name_plural = 'Newsletter Subscriptions'
+
+    def __str__(self):
+        return self.email

@@ -1,0 +1,155 @@
+INFO 2025-02-18 17:42:43,820 autoreload 46320 8520239168 Watching for file changes with StatReloader
+ERROR 2025-02-18 18:02:36,800 views 46320 6166654976 Error in retrieve view: 
+ERROR 2025-02-18 18:02:36,802 log 46320 6166654976 Internal Server Error: /api/v1/home-sections/section_types/
+ERROR 2025-02-18 18:02:36,844 views 46320 6183481344 Error in retrieve view: 
+ERROR 2025-02-18 18:02:36,845 log 46320 6183481344 Internal Server Error: /api/v1/home-sections/section_types/
+ERROR 2025-02-18 18:04:16,693 views 46320 6166654976 Error in retrieve view: 
+ERROR 2025-02-18 18:04:16,694 log 46320 6166654976 Internal Server Error: /api/v1/home-sections/section_types/
+ERROR 2025-02-18 18:04:16,742 views 46320 6183481344 Error in retrieve view: 
+ERROR 2025-02-18 18:04:16,742 log 46320 6183481344 Internal Server Error: /api/v1/home-sections/section_types/
+ERROR 2025-02-18 18:12:03,596 views 46320 6148681728 Error in retrieve view: 
+ERROR 2025-02-18 18:12:03,597 log 46320 6148681728 Internal Server Error: /api/v1/home-sections/section_types/
+ERROR 2025-02-18 18:12:03,631 views 46320 6165508096 Error in retrieve view: 
+ERROR 2025-02-18 18:12:03,631 log 46320 6165508096 Internal Server Error: /api/v1/home-sections/section_types/
+INFO 2025-02-18 18:15:21,335 autoreload 46320 8520239168 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/views.py changed, reloading.
+INFO 2025-02-18 18:15:22,009 autoreload 48884 8520239168 Watching for file changes with StatReloader
+WARNING 2025-02-18 18:15:52,546 log 48884 6170161152 Bad Request: /api/v1/home-sections/
+INFO 2025-02-18 18:18:16,405 autoreload 48884 8520239168 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/serializers.py changed, reloading.
+INFO 2025-02-18 18:18:16,867 autoreload 49120 8520239168 Watching for file changes with StatReloader
+WARNING 2025-02-18 18:18:23,089 log 49120 6194802688 Bad Request: /api/v1/home-sections/
+WARNING 2025-02-18 18:18:46,589 log 49120 6194802688 Bad Request: /api/v1/home-sections/
+WARNING 2025-02-18 18:20:03,814 log 49120 6194802688 Bad Request: /api/v1/home-sections/
+INFO 2025-02-18 18:22:38,797 autoreload 49120 8520239168 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/models.py changed, reloading.
+INFO 2025-02-18 18:22:43,989 autoreload 49539 8520239168 Watching for file changes with StatReloader
+INFO 2025-02-18 18:24:17,639 autoreload 49539 8520239168 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/views.py changed, reloading.
+INFO 2025-02-18 18:24:18,507 autoreload 49769 8520239168 Watching for file changes with StatReloader
+INFO 2025-02-18 18:27:34,598 views 49769 6193065984 Creating home section with data: <QueryDict: {'section_type': ['TRENDING'], 'title': ['sdfg'], 'subtitle': ['sdfg'], 'description': ['<p>sdfg</p>'], 'is_active': ['true'], 'display_order': ['3'], 'image': [<InMemoryUploadedFile: p3.jpeg (image/jpeg)>]}>
+ERROR 2025-02-18 18:27:34,748 views 49769 6193065984 Validation error: {'section_type': [ErrorDetail(string='home section with this section type already exists.', code='unique')]}
+WARNING 2025-02-18 18:27:34,749 log 49769 6193065984 Bad Request: /api/v1/home-sections/
+INFO 2025-02-18 18:38:49,858 views 49769 6193065984 Creating home section with data: <QueryDict: {}>
+ERROR 2025-02-18 18:38:49,864 views 49769 6193065984 Validation error: {'section_type': [ErrorDetail(string='This field is required.', code='required')], 'title': [ErrorDetail(string='This field is required.', code='required')], 'image': [ErrorDetail(string='No file was submitted.', code='required')]}
+WARNING 2025-02-18 18:38:49,865 log 49769 6193065984 Bad Request: /api/v1/home-sections/
+INFO 2025-02-18 18:40:07,169 views 49769 6226718720 Creating home section with data: <QueryDict: {'title': ['asd'], 'subtitle': ['Asdasd'], 'description': ['asdasDASD'], 'section_type': ['TRENDING'], 'is_active': ['true'], 'display_order': ['2'], 'image': [<InMemoryUploadedFile: p2.jpeg (image/jpeg)>]}>
+ERROR 2025-02-18 18:40:07,190 views 49769 6226718720 Validation error: {'section_type': [ErrorDetail(string='home section with this section type already exists.', code='unique')]}
+WARNING 2025-02-18 18:40:07,191 log 49769 6226718720 Bad Request: /api/v1/home-sections/
+INFO 2025-02-18 18:40:42,709 views 49769 6193065984 Creating home section with data: <QueryDict: {'title': ['asd'], 'subtitle': ['Asdasd'], 'description': ['asdasDASD'], 'section_type': ['FEATURED'], 'is_active': ['true'], 'display_order': ['2'], 'image': [<InMemoryUploadedFile: p2.jpeg (image/jpeg)>]}>
+ERROR 2025-02-18 18:40:42,768 serializers 49769 6193065984 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:40:42,810 serializers 49769 6193065984 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:40:57,855 serializers 49769 6243545088 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:40:57,896 serializers 49769 6193065984 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:41:00,210 serializers 49769 6310850560 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:41:00,491 serializers 49769 6243545088 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:41:00,666 serializers 49769 6310850560 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:41:01,130 serializers 49769 6260371456 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:41:01,266 serializers 49769 6310850560 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:41:01,336 serializers 49769 6294024192 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:42:50,598 serializers 49769 6277771264 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:42:50,779 serializers 49769 6210465792 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:45:50,290 serializers 49769 6244118528 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:45:50,323 serializers 49769 6193639424 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:47:34,635 serializers 49769 6260944896 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:47:34,730 serializers 49769 6277771264 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:50:02,784 serializers 49769 6210465792 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:50:02,899 serializers 49769 6210465792 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:50:29,152 serializers 49769 6193065984 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:50:29,217 serializers 49769 6209892352 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:50:58,684 serializers 49769 6227292160 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 18:50:59,708 serializers 49769 6244118528 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+INFO 2025-02-18 18:51:18,366 views 49769 6193065984 Creating home section with data: <QueryDict: {'title': ['asdf'], 'subtitle': ['sadfds'], 'description': ['<p>sdfsadfsdfsdfsadfds</p>'], 'section_type': ['NEW_ARRIVAL'], 'is_active': ['true'], 'display_order': ['2'], 'image': [<InMemoryUploadedFile: p3.jpeg (image/jpeg)>]}>
+ERROR 2025-02-18 18:51:18,446 serializers 49769 6193065984 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 19:07:19,741 serializers 49769 6193065984 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 19:07:21,758 serializers 49769 6378156032 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 19:07:22,269 serializers 49769 6193065984 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 19:07:23,946 serializers 49769 6361329664 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 19:07:24,185 serializers 49769 6226718720 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 19:07:24,424 serializers 49769 6327676928 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 19:07:33,852 serializers 49769 6278344704 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-18 19:07:34,002 serializers 49769 6192492544 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+INFO 2025-02-19 08:20:29,707 autoreload 8377 8587937856 Watching for file changes with StatReloader
+ERROR 2025-02-19 08:21:55,501 serializers 8377 6274674688 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:21:55,623 serializers 8377 6224195584 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:21:55,899 serializers 8377 6207369216 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:21:55,994 serializers 8377 6274674688 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:21:56,080 serializers 8377 6257848320 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:21:56,140 serializers 8377 6207369216 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:30,485 serializers 8377 6223622144 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:30,508 serializers 8377 6189969408 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:33,888 serializers 8377 6292074496 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:33,987 serializers 8377 6274101248 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:34,134 serializers 8377 6206795776 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:34,208 serializers 8377 6274101248 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:34,305 serializers 8377 6257274880 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:34,372 serializers 8377 6292074496 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:38,674 serializers 8377 6274674688 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:38,746 serializers 8377 6241021952 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:38,874 serializers 8377 6241021952 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:39,033 serializers 8377 6241021952 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:39,107 serializers 8377 6190542848 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:22:39,154 serializers 8377 6274674688 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:24:35,967 serializers 8377 6189969408 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:24:36,089 serializers 8377 6223622144 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:24:36,200 serializers 8377 6274101248 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:24:36,350 serializers 8377 6292647936 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:24:36,477 serializers 8377 6292647936 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:24:36,527 serializers 8377 6274101248 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+INFO 2025-02-19 08:25:13,746 views 8377 6223622144 SMS API Response for 7878787877: {"status":"success","message-id":["12b8-990-216a-be88"],"message":"SMS Sent Successfully"}
+ERROR 2025-02-19 08:48:27,311 serializers 8377 6274674688 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:48:27,761 serializers 8377 6223622144 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:49:15,800 serializers 8377 6274101248 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:49:15,880 serializers 8377 6240448512 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:54:31,770 serializers 8377 6274101248 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:54:31,886 serializers 8377 6223622144 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:54:31,998 serializers 8377 6257274880 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:54:32,060 serializers 8377 6189969408 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:54:32,107 serializers 8377 6257274880 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:54:32,153 serializers 8377 6206795776 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+WARNING 2025-02-19 08:54:43,780 log 8377 6240448512 Unauthorized: /api/v1/login/
+ERROR 2025-02-19 08:56:13,999 serializers 8377 6223622144 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:56:14,075 serializers 8377 6257274880 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:56:14,195 serializers 8377 6240448512 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:56:14,287 serializers 8377 6240448512 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:56:14,337 serializers 8377 6240448512 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:56:14,373 serializers 8377 6257274880 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:56:25,950 serializers 8377 6292074496 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 08:56:26,019 serializers 8377 6257274880 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:01:12,522 views 8377 6189969408 Order processing error: Order amount less than minimum amount allowed
+ERROR 2025-02-19 09:01:12,524 log 8377 6189969408 Internal Server Error: /api/v1/orders/create/
+ERROR 2025-02-19 09:04:00,734 serializers 8377 6274674688 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:04:00,867 serializers 8377 6257848320 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:04:00,972 serializers 8377 6291501056 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:04:01,050 serializers 8377 6257848320 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:04:01,104 serializers 8377 6241021952 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:04:01,144 serializers 8377 6257848320 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+INFO 2025-02-19 09:10:40,747 autoreload 8377 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/api/urls.py changed, reloading.
+INFO 2025-02-19 09:10:41,276 autoreload 12747 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:11:05,274 autoreload 12747 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/models.py changed, reloading.
+INFO 2025-02-19 09:11:05,620 autoreload 12788 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:11:52,110 autoreload 12788 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/serializers.py changed, reloading.
+INFO 2025-02-19 09:11:52,462 autoreload 12832 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:12:31,711 autoreload 12832 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/views.py changed, reloading.
+INFO 2025-02-19 09:12:32,079 autoreload 12908 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:13:24,042 autoreload 12908 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/admin.py changed, reloading.
+INFO 2025-02-19 09:13:24,389 autoreload 12964 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:13:54,988 autoreload 12964 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/admin.py changed, reloading.
+INFO 2025-02-19 09:13:55,300 autoreload 13010 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:21:47,167 autoreload 13010 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/models.py changed, reloading.
+INFO 2025-02-19 09:21:47,976 autoreload 13326 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:24:03,047 autoreload 13469 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:24:19,503 autoreload 13469 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/admin.py changed, reloading.
+INFO 2025-02-19 09:24:19,808 autoreload 13511 8587937856 Watching for file changes with StatReloader
+ERROR 2025-02-19 09:40:17,763 serializers 13511 6249705472 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:40:20,625 serializers 13511 6268252160 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:40:20,712 serializers 13511 6199226368 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+INFO 2025-02-19 09:44:41,008 views 13511 6165000192 Contact form submission: {'name': 'vikas', 'email': 'vikasgupta282@gmail.com', 'phone': '8860552680', 'subject': 'testing', 'message': 'testging'}
+ERROR 2025-02-19 09:45:30,167 serializers 13511 6268252160 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+ERROR 2025-02-19 09:45:30,316 serializers 13511 6165000192 Error getting products: Field name `title` is not valid for model `Product` in `home.serializers.ProductListSerializer`.
+INFO 2025-02-19 09:48:28,997 autoreload 13511 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/models.py changed, reloading.
+INFO 2025-02-19 09:48:29,455 autoreload 15131 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:49:02,778 autoreload 15131 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/serializers.py changed, reloading.
+INFO 2025-02-19 09:49:03,385 autoreload 15193 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:49:44,867 autoreload 15193 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/views.py changed, reloading.
+INFO 2025-02-19 09:49:45,344 autoreload 15233 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:52:55,730 autoreload 15233 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/api/urls.py changed, reloading.
+INFO 2025-02-19 09:52:56,127 autoreload 15464 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-19 09:53:41,887 autoreload 15464 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/admin.py changed, reloading.
+INFO 2025-02-19 09:53:42,243 autoreload 15514 8587937856 Watching for file changes with StatReloader
