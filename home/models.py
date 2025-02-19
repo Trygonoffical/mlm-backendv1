@@ -15,6 +15,10 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q, Max, F
 from django.core.validators import MinLengthValidator
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ------------------------ Cusom User Model Area ------------------------------------
 class CustomUserManager(BaseUserManager):
     def create_user(self, username, password=None, **extra_fields):
@@ -667,15 +671,19 @@ class HomeSection(models.Model):
 
     def get_products(self):
         """Get products based on section type"""
-        if self.section_type == HomeSectionType.TRENDING:
-            return Product.objects.filter(is_trending=True, is_active=True)
-        elif self.section_type == HomeSectionType.FEATURED:
-            return Product.objects.filter(is_featured=True, is_active=True)
-        elif self.section_type == HomeSectionType.NEW_ARRIVAL:
-            return Product.objects.filter(is_new_arrival=True, is_active=True)
-        elif self.section_type == HomeSectionType.BESTSELLER:
-            return Product.objects.filter(is_bestseller=True, is_active=True)
-        return Product.objects.none()
+        try:
+            if self.section_type == HomeSectionType.TRENDING:
+                return Product.objects.filter(is_trending=True, is_active=True)
+            elif self.section_type == HomeSectionType.FEATURED:
+                return Product.objects.filter(is_featured=True, is_active=True)
+            elif self.section_type == HomeSectionType.NEW_ARRIVAL:
+                return Product.objects.filter(is_new_arrival=True, is_active=True)
+            elif self.section_type == HomeSectionType.BESTSELLER:
+                return Product.objects.filter(is_bestseller=True, is_active=True)
+            return Product.objects.none()
+        except Exception as e:
+            logger.error(f"Error getting products for section {self.section_type}: {str(e)}")
+            return Product.objects.none()
 
 #  -------------------------------- Company Info Model ----------------------------------------
 

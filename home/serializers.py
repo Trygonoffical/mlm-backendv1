@@ -751,21 +751,62 @@ class AboutSerializer(serializers.ModelSerializer):
     
 class ProductListSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
-
+    images = ProductImageSerializer(many=True, read_only=True)
+    feature_image = serializers.SerializerMethodField()
+    discount_percentage = serializers.SerializerMethodField()
     class Meta:
         model = Product
         fields = [
-            'id', 'title', 'slug', 'price', 'sale_price',
-            'image', 'image_url', 'is_active',
-            'is_trending', 'is_featured', 'is_new_arrival', 'is_bestseller'
+            'id', 'name', 'slug', 'regular_price', 'selling_price', 'images',
+            'feature_image', 'image_url', 'discount_percentage',
+            'is_active', 'is_trending', 'is_featured', 
+            'is_new_arrival', 'is_bestseller', 'description',
+            'bp_value', 'stock', 'gst_percentage'
         ]
 
     def get_image_url(self, obj):
-        if obj.image:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.image.url)
-        return None
+        try:
+            feature_image = obj.images.filter(is_feature=True).first()
+            if feature_image and feature_image.image:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(feature_image.image.url)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting image URL for product {obj.id}: {str(e)}")
+            return None
+
+    def get_feature_image(self, obj):
+        try:
+            feature_image = obj.images.filter(is_feature=True).first()
+            if feature_image:
+                request = self.context.get('request')
+                if request:
+                    return request.build_absolute_uri(feature_image.image.url)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting feature image for product {obj.id}: {str(e)}")
+            return None
+
+    def get_discount_percentage(self, obj):
+        try:
+            if obj.regular_price > 0:
+                discount = ((obj.regular_price - obj.selling_price) / obj.regular_price) * 100
+                return round(discount, 2)
+            return 0
+        except Exception as e:
+            logger.error(f"Error calculating discount for product {obj.id}: {str(e)}")
+            return 0
+    def to_representation(self, instance):
+        try:
+            data = super().to_representation(instance)
+            # Sort images by order
+            if data.get('images'):
+                data['images'] = sorted(data['images'], key=lambda x: x.get('order', 0))
+            return data
+        except Exception as e:
+            logger.error(f"Error in to_representation for product {instance.id}: {str(e)}")
+            return {}
 
 # class HomeSectionSerializer(serializers.ModelSerializer):
 #     section_type_display = serializers.CharField(source='get_section_type_display', read_only=True)
@@ -833,8 +874,17 @@ class HomeSectionSerializer(serializers.ModelSerializer):
     def get_products(self, obj):
         try:
             if not hasattr(obj, 'get_products'):
+                logger.error(f"Section {obj.id} does not have get_products method")
                 return []
             products = obj.get_products()
+
+            logger.info(f"Found {products.count()} products for section {obj.section_type}")
+
+            # Make sure we have request in context
+            if 'request' not in self.context:
+                logger.error("Request missing from serializer context")
+                self.context['request'] = self.context.get('request')
+
             return ProductListSerializer(
                 products, 
                 many=True, 
@@ -842,25 +892,32 @@ class HomeSectionSerializer(serializers.ModelSerializer):
             ).data
         except Exception as e:
             logger.error(f"Error getting products: {str(e)}")
+            logger.exception(e)
             return []
 
     def to_representation(self, instance):
         try:
             data = super().to_representation(instance)
-            # Ensure image_url is properly formatted
+            
+            # Log the data being returned for debugging
+            logger.info(f"Section {instance.id} data: {data}")
+            
+            # Ensure proper image URL
             if data.get('image'):
                 if not data.get('image_url'):
                     request = self.context.get('request')
                     if request and hasattr(instance.image, 'url'):
                         data['image_url'] = request.build_absolute_uri(instance.image.url)
+            
             return data
         except Exception as e:
-            logger.error(f"Error in to_representation: {str(e)}")
+            logger.error(f"Error in to_representation for section {instance.id}: {str(e)}")
             return {}
-        
+
     def validate_section_type(self, value):
         if value not in HomeSectionType.values:
             raise serializers.ValidationError(f"Invalid section type. Must be one of: {HomeSectionType.values}")
+        
         instance = self.instance
         if instance is None:  # Creating new instance
             if HomeSection.objects.filter(section_type=value).exists():
@@ -868,6 +925,7 @@ class HomeSectionSerializer(serializers.ModelSerializer):
         elif instance.section_type != value:  # Updating instance
             if HomeSection.objects.filter(section_type=value).exists():
                 raise serializers.ValidationError(f'A section with type {value} already exists.')
+                
         return value
         
 class MenuSerializer(serializers.ModelSerializer):
