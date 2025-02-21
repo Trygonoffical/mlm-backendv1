@@ -3,7 +3,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path , include
 from rest_framework.routers import DefaultRouter
-from appAuth.views import GenerateOTP , VerifyOTP , UserLogin , RefreshToken , ValidateTokenView , CustomTokenRefreshView , HomeSliderViewSet , CategoryViewSet , ProductViewSet , PositionViewSet , MLMMemberViewSet , TestimonialViewSet , AdvertisementViewSet , SuccessStoryViewSet , CustomerPickViewSet , CompanyInfoViewSet , AboutViewSet , HomeSectionViewSet , MenuViewSet , CustomPageViewSet , KYCDocumentViewSet , BlogViewSet , CreateOrderView, VerifyPaymentView , AddressViewSet , CustomerProfileView , OrderProcessView , PaymentWebhookView , download_invoice , OrderViewSet , WalletViewSet, WalletTransactionViewSet, WithdrawalRequestViewSet , NotificationViewSet , AdminOrderListView , UpdateOrderStatusView , MLMOrderListView , MLMMemberTreeView , MLMMemberDetailsView , MLMReportView , MLMDashboardView , AdminDashboardView , MLMMemberRegistrationView , DownlineListView , ContactViewSet , NewsletterViewSet
+from appAuth.views import GenerateOTP , VerifyOTP , UserLogin , RefreshToken , ValidateTokenView , CustomTokenRefreshView , HomeSliderViewSet , CategoryViewSet , ProductViewSet , PositionViewSet , MLMMemberViewSet , TestimonialViewSet , AdvertisementViewSet , SuccessStoryViewSet , CustomerPickViewSet , CompanyInfoViewSet , AboutViewSet , HomeSectionViewSet , MenuViewSet , CustomPageViewSet , KYCDocumentViewSet , BlogViewSet , CreateOrderView, VerifyPaymentView , AddressViewSet , CustomerProfileView , OrderProcessView , PaymentWebhookView , download_invoice , OrderViewSet , WalletViewSet, WalletTransactionViewSet, WithdrawalRequestViewSet , NotificationViewSet , AdminOrderListView , UpdateOrderStatusView , MLMOrderListView , MLMMemberTreeView , MLMMemberDetailsView , MLMReportView , MLMDashboardView , AdminDashboardView , MLMMemberRegistrationView , DownlineListView , ContactViewSet , NewsletterViewSet , MLMLiveCommissionView , AdminCustomerViewSet
 
 
 router = DefaultRouter()
@@ -32,6 +32,7 @@ router.register(r'withdrawal-requests', WithdrawalRequestViewSet, basename='with
 router.register(r'notifications', NotificationViewSet, basename='notifications')
 router.register(r'contacts', ContactViewSet, basename='contact')
 router.register(r'newsletters', NewsletterViewSet ,basename='newsletters' )
+router.register(r'admin/customers', AdminCustomerViewSet, basename='admin-customers')
 
 urlpatterns = [
     path('config/', config),
@@ -98,6 +99,8 @@ urlpatterns = [
 
     path('mlm/register-member/', MLMMemberRegistrationView.as_view(), name='mlm-member-registration'),
     path('mlm/downline/', DownlineListView.as_view(), name='mlm-downline-list'),
+
+     path('mlm/member/<str:member_id>/live-commissions/', MLMLiveCommissionView.as_view(), name='mlm-live-commissions'),
 
     # path('kyc-documents/bank-details/', 
     #  KYCDocumentViewSet.as_view({'get': 'bank_details', 'post': 'bank_details', 'put': 'bank_details'}), 

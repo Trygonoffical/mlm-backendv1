@@ -191,6 +191,7 @@ class ProductImage(models.Model):
 class Product(models.Model):
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=250, unique=True)
+    HSN_Code = models.SlugField(max_length=50, unique=True , null=True)
     description = models.TextField()
     regular_price = models.DecimalField(max_digits=10, decimal_places=2)
     selling_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -880,7 +881,7 @@ class Advertisement(models.Model):
     title = models.CharField(max_length=200, blank=True, null=True)
     image = models.ImageField(upload_to='advertisements/')
     link = models.URLField(blank=True, null=True)
-    position = models.CharField(max_length=100, blank=True, null=True , choices=AdvertisementPositionType.choices, unique=True , default=AdvertisementPositionType.SIDEBAR)
+    position = models.CharField(max_length=100, blank=True, null=True , choices=AdvertisementPositionType.choices, default=AdvertisementPositionType.SIDEBAR)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1099,7 +1100,7 @@ class Notification(models.Model):
     message = models.TextField()
     notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
     recipient = models.ForeignKey(
-        User, 
+        MLMMember, 
         on_delete=models.CASCADE, 
         related_name='notifications',
         null=True, 

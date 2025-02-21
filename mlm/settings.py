@@ -104,7 +104,7 @@ DATABASES = {
 
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'mlmv3',
+        'NAME': 'mlmv4',
         'USER': 'postgres',
         'PASSWORD': 'Trygon@123',
         'HOST': 'localhost',

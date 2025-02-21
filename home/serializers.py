@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter
+from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag
 from appAuth.serializers import UserSerializer
 from django.db import IntegrityError
 from django.db.models import Sum, Avg, Count, Min, Max
@@ -62,20 +62,174 @@ class CategoryDetailSerializer(serializers.ModelSerializer):
         model = Category
         fields = ['id', 'name']
 
+# class ProductSerializer(serializers.ModelSerializer):
+#     images = ProductImageSerializer(many=True, read_only=True)
+#     features = ProductFeatureSerializer(many=True, read_only=True)
+#     uploaded_images = serializers.ListField(
+#         child=serializers.ImageField(max_length=1000000),
+#         write_only=True,
+#         required=False
+#     )
+#     # feature_list = serializers.ListField(
+#     #     child=serializers.DictField(),
+#     #     write_only=True,
+#     #     required=False
+#     # )
+#     feature_list = serializers.JSONField(required=False)
+#     slug = serializers.SlugField(read_only=True)
+#     categories = serializers.PrimaryKeyRelatedField(
+#         many=True,
+#         queryset=Category.objects.all(),
+#         required=False
+#     )
+#     category_details = CategoryDetailSerializer(source='categories', many=True, read_only=True)
+
+#     class Meta:
+#         model = Product
+#         fields = ['id', 'name', 'slug', 'description', 'regular_price', 
+#                  'selling_price', 'bp_value', 'gst_percentage', 'stock',
+#                  'is_featured', 'is_bestseller', 'is_new_arrival', 
+#                  'is_trending', 'is_active', 'images', 'features',
+#                  'uploaded_images', 'feature_list', 'categories', 'category_details']
+#         # read_only_fields = ['slug']  # Make sure slug is read-only
+        
+
+#     def validate(self, data):
+#         # Add proper validation messages
+#         if not data.get('name'):
+#             raise serializers.ValidationError({'name': 'Name is required'})
+        
+#         # Generate slug from name
+#         from django.utils.text import slugify
+        
+#         # Get the base slug from the name
+#         base_slug = slugify(data['name'])
+
+#         # Check if this slug already exists
+#         if Product.objects.filter(slug=base_slug).exists():
+#             # If it exists, append a number to make it unique
+#             count = 1
+#             while Product.objects.filter(slug=f"{base_slug}-{count}").exists():
+#                 count += 1
+#             data['slug'] = f"{base_slug}-{count}"
+#         else:
+#             data['slug'] = base_slug
+#         return data
+    
+#     def validate_feature_list(self, value):
+#         """
+#         Validate the feature list data
+#         """
+#         # If value is a string, try to parse it as JSON
+#         if isinstance(value, str):
+#             try:
+#                 import json
+#                 value = json.loads(value)
+#             except json.JSONDecodeError:
+#                 raise serializers.ValidationError("Invalid JSON format for feature_list")
+
+#         if not isinstance(value, list):
+#             raise serializers.ValidationError("Feature list must be an array")
+        
+#         for feature in value:
+#             if not isinstance(feature, dict):
+#                 raise serializers.ValidationError("Each feature must be an object")
+#             if 'title' not in feature or 'content' not in feature:
+#                 raise serializers.ValidationError("Each feature must have title and content")
+#         return value
+    
+
+#     def create(self, validated_data):
+#         uploaded_images = validated_data.pop('uploaded_images', [])
+#         feature_list = validated_data.pop('feature_list', [])
+#         categories = validated_data.pop('categories', [])
+
+#         # If feature_list is a string, parse it
+#         # if isinstance(feature_list, str):
+#         #     import json
+#         #     feature_list = json.loads(feature_list)
+
+
+#         product = Product.objects.create(**validated_data)
+        
+#         # Add categories
+#         if categories:
+#             product.categories.set(categories)
+
+
+#         # Create product features
+#         for idx, feature_data in enumerate(feature_list, 1):
+#             ProductFeature.objects.create(
+#                 product=product,
+#                 order=idx,
+#                 # **feature_data
+#                 title=feature_data.get('title', ''),
+#                 content=feature_data.get('content', '')
+#             )
+        
+#         # Create product images
+#         for idx, image in enumerate(uploaded_images):
+#             ProductImage.objects.create(
+#                 product=product,
+#                 image=image,
+#                 order=idx + 1,
+#                 is_feature=idx == 0  # First image is feature image
+#             )
+            
+        
+#         return product
+
+#     def update(self, instance, validated_data):
+#         uploaded_images = validated_data.pop('uploaded_images', [])
+#         feature_list = validated_data.pop('feature_list', [])
+#         categories = validated_data.pop('categories', None)
+
+
+#         # Update categories if provided
+#         if categories is not None:
+#             instance.categories.set(categories)
+
+
+#         # Update product fields
+#         for attr, value in validated_data.items():
+#             setattr(instance, attr, value)
+#         instance.save()
+        
+#         # Update features
+#         if feature_list:
+#             instance.features.all().delete()
+#             for idx, feature_data in enumerate(feature_list):
+#                 ProductFeature.objects.create(
+#                     product=instance,
+#                     order=idx + 1,
+#                     **feature_data
+#                 )
+        
+#         # Add new images
+#         for idx, image in enumerate(uploaded_images):
+#             ProductImage.objects.create(
+#                 product=instance,
+#                 image=image,
+#                 order=instance.images.count() + idx + 1
+#             )
+        
+#         return instance
+class ProductFAQSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductFAQ
+        fields = ['id', 'title', 'content', 'order']
+
 class ProductSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     features = ProductFeatureSerializer(many=True, read_only=True)
+    faq = ProductFAQSerializer(many=True, read_only=True)
     uploaded_images = serializers.ListField(
         child=serializers.ImageField(max_length=1000000),
         write_only=True,
         required=False
     )
-    # feature_list = serializers.ListField(
-    #     child=serializers.DictField(),
-    #     write_only=True,
-    #     required=False
-    # )
     feature_list = serializers.JSONField(required=False)
+    faq_list = serializers.JSONField(required=False)
     slug = serializers.SlugField(read_only=True)
     categories = serializers.PrimaryKeyRelatedField(
         many=True,
@@ -83,15 +237,24 @@ class ProductSerializer(serializers.ModelSerializer):
         required=False
     )
     category_details = CategoryDetailSerializer(source='categories', many=True, read_only=True)
+    
+    # Meta tag fields
+    meta_title = serializers.CharField(write_only=True, required=False)
+    meta_description = serializers.CharField(write_only=True, required=False)
+    meta_keywords = serializers.CharField(write_only=True, required=False)
+    meta_og_title = serializers.CharField(write_only=True, required=False)
+    meta_og_description = serializers.CharField(write_only=True, required=False)
+    meta_canonical_url = serializers.URLField(write_only=True, required=False)
 
     class Meta:
         model = Product
-        fields = ['id', 'name', 'slug', 'description', 'regular_price', 
+        fields = ['id', 'name', 'slug', 'HSN_Code', 'description', 'regular_price', 
                  'selling_price', 'bp_value', 'gst_percentage', 'stock',
                  'is_featured', 'is_bestseller', 'is_new_arrival', 
-                 'is_trending', 'is_active', 'images', 'features',
-                 'uploaded_images', 'feature_list', 'categories', 'category_details']
-        # read_only_fields = ['slug']  # Make sure slug is read-only
+                 'is_trending', 'is_active', 'images', 'features', 'faq',
+                 'uploaded_images', 'feature_list', 'faq_list', 'categories', 
+                 'category_details', 'meta_title', 'meta_description', 'meta_keywords',
+                 'meta_og_title', 'meta_og_description', 'meta_canonical_url']
         
 
     def validate(self, data):
@@ -138,33 +301,64 @@ class ProductSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Each feature must have title and content")
         return value
     
+    def validate_faq_list(self, value):
+        """
+        Validate the FAQ list data
+        """
+        # If value is a string, try to parse it as JSON
+        if isinstance(value, str):
+            try:
+                import json
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                raise serializers.ValidationError("Invalid JSON format for faq_list")
+
+        if not isinstance(value, list):
+            raise serializers.ValidationError("FAQ list must be an array")
+        
+        for faq in value:
+            if not isinstance(faq, dict):
+                raise serializers.ValidationError("Each FAQ must be an object")
+            if 'title' not in faq or 'content' not in faq:
+                raise serializers.ValidationError("Each FAQ must have title and content")
+        return value
 
     def create(self, validated_data):
         uploaded_images = validated_data.pop('uploaded_images', [])
         feature_list = validated_data.pop('feature_list', [])
+        faq_list = validated_data.pop('faq_list', [])
         categories = validated_data.pop('categories', [])
+        
+        # Extract meta fields
+        meta_fields = {}
+        for field in ['meta_title', 'meta_description', 'meta_keywords', 
+                     'meta_og_title', 'meta_og_description', 'meta_canonical_url']:
+            if field in validated_data:
+                meta_fields[field.replace('meta_', '')] = validated_data.pop(field)
 
-        # If feature_list is a string, parse it
-        # if isinstance(feature_list, str):
-        #     import json
-        #     feature_list = json.loads(feature_list)
-
-
+        # Create product
         product = Product.objects.create(**validated_data)
         
         # Add categories
         if categories:
             product.categories.set(categories)
 
-
         # Create product features
         for idx, feature_data in enumerate(feature_list, 1):
             ProductFeature.objects.create(
                 product=product,
                 order=idx,
-                # **feature_data
                 title=feature_data.get('title', ''),
                 content=feature_data.get('content', '')
+            )
+        
+        # Create product FAQs
+        for idx, faq_data in enumerate(faq_list, 1):
+            ProductFAQ.objects.create(
+                product=product,
+                order=idx,
+                title=faq_data.get('title', ''),
+                content=faq_data.get('content', '')
             )
         
         # Create product images
@@ -175,19 +369,38 @@ class ProductSerializer(serializers.ModelSerializer):
                 order=idx + 1,
                 is_feature=idx == 0  # First image is feature image
             )
+            
+        # Create meta tags if provided
+        if meta_fields:
+            MetaTag.objects.create(
+                title=meta_fields.get('title', product.name),
+                description=meta_fields.get('description', ''),
+                keywords=meta_fields.get('keywords', ''),
+                og_title=meta_fields.get('og_title', ''),
+                og_description=meta_fields.get('og_description', ''),
+                canonical_url=meta_fields.get('canonical_url', ''),
+                page_type='PRODUCT',
+                product=product
+            )
         
         return product
 
     def update(self, instance, validated_data):
         uploaded_images = validated_data.pop('uploaded_images', [])
         feature_list = validated_data.pop('feature_list', [])
+        faq_list = validated_data.pop('faq_list', [])
         categories = validated_data.pop('categories', None)
 
+        # Extract meta fields
+        meta_fields = {}
+        for field in ['meta_title', 'meta_description', 'meta_keywords', 
+                     'meta_og_title', 'meta_og_description', 'meta_canonical_url']:
+            if field in validated_data:
+                meta_fields[field.replace('meta_', '')] = validated_data.pop(field)
 
         # Update categories if provided
         if categories is not None:
             instance.categories.set(categories)
-
 
         # Update product fields
         for attr, value in validated_data.items():
@@ -197,11 +410,23 @@ class ProductSerializer(serializers.ModelSerializer):
         # Update features
         if feature_list:
             instance.features.all().delete()
-            for idx, feature_data in enumerate(feature_list):
+            for idx, feature_data in enumerate(feature_list, 1):
                 ProductFeature.objects.create(
                     product=instance,
                     order=idx + 1,
-                    **feature_data
+                    title=feature_data.get('title', ''),
+                    content=feature_data.get('content', '')
+                )
+                
+        # Update FAQs
+        if faq_list:
+            instance.faq.all().delete()
+            for idx, faq_data in enumerate(faq_list, 1):
+                ProductFAQ.objects.create(
+                    product=instance,
+                    order=idx + 1,
+                    title=faq_data.get('title', ''),
+                    content=faq_data.get('content', '')
                 )
         
         # Add new images
@@ -211,9 +436,29 @@ class ProductSerializer(serializers.ModelSerializer):
                 image=image,
                 order=instance.images.count() + idx + 1
             )
+            
+        # Update meta tags if provided
+        if meta_fields:
+            meta_tag = MetaTag.objects.filter(product=instance).first()
+            if meta_tag:
+                for key, value in meta_fields.items():
+                    if value:  # Only update if a value was provided
+                        setattr(meta_tag, key, value)
+                meta_tag.save()
+            else:
+                # Create new meta tag if it doesn't exist
+                MetaTag.objects.create(
+                    title=meta_fields.get('title', instance.name),
+                    description=meta_fields.get('description', ''),
+                    keywords=meta_fields.get('keywords', ''),
+                    og_title=meta_fields.get('og_title', ''),
+                    og_description=meta_fields.get('og_description', ''),
+                    canonical_url=meta_fields.get('canonical_url', ''),
+                    page_type='PRODUCT',
+                    product=instance
+                )
         
         return instance
-    
 
 class CategorySerializer(serializers.ModelSerializer):
     products = ProductSerializer(many=True, read_only=True)
@@ -605,12 +850,13 @@ class TestimonialSerializer(serializers.ModelSerializer):
 
 class AdvertisementSerializer(serializers.ModelSerializer):
     image_url = serializers.SerializerMethodField()
+    position_display = serializers.CharField(source='get_position_display', read_only=True)
 
     class Meta:
         model = Advertisement
         fields = [
             'id', 'title', 'image', 'image_url', 'link', 
-            'position', 'is_active', 'created_at'
+            'position', 'position_display', 'is_active', 'created_at'
         ]
         read_only_fields = ['created_at']
 
@@ -620,6 +866,11 @@ class AdvertisementSerializer(serializers.ModelSerializer):
             if request:
                 return request.build_absolute_uri(obj.image.url)
         return None
+        
+    def validate(self, data):
+        # Add any additional validation if needed
+        print(f"Advertisement serializer validating data: {data}")
+        return data
     
 
 class SuccessStorySerializer(serializers.ModelSerializer):
@@ -1111,12 +1362,17 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user = serializers.SerializerMethodField()
+    # Or use SerializerMethodField
+    final_amount_display = serializers.SerializerMethodField()
+
+    def get_final_amount_display(self, obj):
+        return float(obj.final_amount)
     class Meta:
         model = Order
         fields = [
             'id', 'order_number', 'order_date', 'status',
             'total_amount', 'discount_amount', 'final_amount',
-            'shipping_address', 'billing_address', 'total_bp',
+            'final_amount_display', 'shipping_address', 'billing_address', 'total_bp',
             'items' ,'user'
         ]
     def get_user(self, obj):
@@ -1169,11 +1425,62 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
         read_only_fields = ['processed_at', 'rejection_reason']
 
 
+# class NotificationSerializer(serializers.ModelSerializer):
+#     recipient_name = serializers.CharField(source='recipient.get_full_name', read_only=True)
+#     notification_type_display = serializers.CharField(source='get_notification_type_display', read_only=True)
+#     recipient = serializers.PrimaryKeyRelatedField(
+#         queryset=User.objects.filter(role='MLM_MEMBER'),
+#         required=False,
+#         allow_null=True
+#     )
+#     time_ago = serializers.SerializerMethodField()
+
+#     class Meta:
+#         model = Notification
+#         fields = [
+#             'id', 'title', 'message', 'notification_type', 
+#             'notification_type_display', 'recipient', 'recipient_name',
+#             'is_read', 'created_at', 'read_at', 'time_ago'
+#         ]
+#         read_only_fields = ['is_read', 'created_at', 'read_at']
+
+#     def get_time_ago(self, obj):
+#         from django.utils import timezone
+#         now = timezone.now()
+#         diff = now - obj.created_at
+
+#         if diff.days > 30:
+#             return obj.created_at.strftime("%b %d, %Y")
+#         elif diff.days > 0:
+#             return f"{diff.days} days ago"
+#         elif diff.seconds > 3600:
+#             hours = diff.seconds // 3600
+#             return f"{hours} hours ago"
+#         elif diff.seconds > 60:
+#             minutes = diff.seconds // 60
+#             return f"{minutes} minutes ago"
+#         else:
+#             return "Just now"
+
+#     def validate(self, data):
+#         # Validate notification type and recipient
+#         notification_type = data.get('notification_type')
+#         recipient = data.get('recipient')
+
+#         if notification_type == 'INDIVIDUAL' and not recipient:
+#             raise serializers.ValidationError({
+#                 'recipient': 'Recipient is required for individual notifications'
+#             })
+#         elif notification_type == 'GENERAL' and recipient:
+#             data['recipient'] = None  # Clear recipient for general notifications
+
+#         return data
+    
 class NotificationSerializer(serializers.ModelSerializer):
-    recipient_name = serializers.CharField(source='recipient.get_full_name', read_only=True)
+    recipient_name = serializers.CharField(source='recipient.user.get_full_name', read_only=True)
     notification_type_display = serializers.CharField(source='get_notification_type_display', read_only=True)
     recipient = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.filter(role='MLM_MEMBER'),
+        queryset=MLMMember.objects.all(),
         required=False,
         allow_null=True
     )
@@ -1187,6 +1494,26 @@ class NotificationSerializer(serializers.ModelSerializer):
             'is_read', 'created_at', 'read_at', 'time_ago'
         ]
         read_only_fields = ['is_read', 'created_at', 'read_at']
+
+    def validate(self, data):
+        notification_type = data.get('notification_type')
+        recipient = data.get('recipient')
+
+        if notification_type == 'INDIVIDUAL' and not recipient:
+            raise serializers.ValidationError({
+                'recipient': 'Recipient is required for individual notifications'
+            })
+
+        if notification_type == 'GENERAL' and recipient:
+            data['recipient'] = None
+
+        # Verify recipient is active if provided
+        if recipient and not recipient.is_active:
+            raise serializers.ValidationError({
+                'recipient': 'Selected recipient is not active'
+            })
+
+        return data
 
     def get_time_ago(self, obj):
         from django.utils import timezone
@@ -1205,22 +1532,7 @@ class NotificationSerializer(serializers.ModelSerializer):
             return f"{minutes} minutes ago"
         else:
             return "Just now"
-
-    def validate(self, data):
-        # Validate notification type and recipient
-        notification_type = data.get('notification_type')
-        recipient = data.get('recipient')
-
-        if notification_type == 'INDIVIDUAL' and not recipient:
-            raise serializers.ValidationError({
-                'recipient': 'Recipient is required for individual notifications'
-            })
-        elif notification_type == 'GENERAL' and recipient:
-            data['recipient'] = None  # Clear recipient for general notifications
-
-        return data
-    
-
+        
 class MLMMemberRegistrationSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=100, required=True)
     last_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
@@ -1313,3 +1625,27 @@ class NewsletterSerializer(serializers.ModelSerializer):
         if Newsletter.objects.filter(email=value).exists():
             raise serializers.ValidationError("This email is already subscribed")
         return value
+    
+
+
+class CustomerListSerializer(serializers.ModelSerializer):
+    order_count = serializers.IntegerField(read_only=True)
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'first_name', 'last_name', 'email', 
+            'phone_number', 'date_joined', 'order_count'
+        ]
+
+class CustomerDetailSerializer(serializers.ModelSerializer):
+    addresses = AddressSerializer(many=True)
+    order_count = serializers.IntegerField(read_only=True)
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'first_name', 'last_name', 'email', 
+            'phone_number', 'date_joined', 'order_count', 'addresses'
+        ]
+

@@ -1,6 +1,7 @@
 import requests
 import logging
 import uuid
+import datetime
 from rest_framework import serializers
 from rest_framework import status
 from rest_framework.views import APIView
@@ -15,7 +16,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -607,7 +608,7 @@ class MLMMemberViewSet(viewsets.ModelViewSet):
         return MLMMemberSerializer
 
     def get_queryset(self):
-        return MLMMember.objects.select_related(
+        queryset = MLMMember.objects.select_related(
             'user', 
             'position', 
             'sponsor', 
@@ -616,7 +617,38 @@ class MLMMemberViewSet(viewsets.ModelViewSet):
             'earned_commissions',
             'generated_commissions',
             'user__wallet__transactions'
-        ).all()
+        )
+        
+        # Get query parameters for filtering
+        search = self.request.query_params.get('search')
+        position = self.request.query_params.get('position')
+        sponsor = self.request.query_params.get('sponsor')
+        join_date = self.request.query_params.get('join_date')
+        is_active = self.request.query_params.get('is_active')
+        
+        # Apply filters
+        if search:
+            queryset = queryset.filter(
+                Q(user__first_name__icontains=search) | 
+                Q(user__last_name__icontains=search) |
+                Q(member_id__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(user__phone_number__icontains=search)
+            )
+        
+        if position:
+            queryset = queryset.filter(position_id=position)
+            
+        if sponsor:
+            queryset = queryset.filter(sponsor__member_id=sponsor)
+            
+        if join_date:
+            queryset = queryset.filter(join_date__date=join_date)
+            
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        
+        return queryset.all()
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -822,6 +854,19 @@ class AdvertisementViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(is_active=is_active.lower() == 'true')
                 
         return queryset.order_by('-created_at')
+
+    def create(self, request, *args, **kwargs):
+        # Add debug logging
+        print(f"Received request data: {request.data}")
+        
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            print(f"Validation errors: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     @action(detail=True, methods=['POST'])
     def toggle_status(self, request, pk=None):
@@ -2200,6 +2245,74 @@ class WithdrawalRequestViewSet(viewsets.ModelViewSet):
 
 
 # ------------------ Notification -----------------------
+# class NotificationViewSet(viewsets.ModelViewSet):
+#     serializer_class = NotificationSerializer
+#     permission_classes = [IsAuthenticated]
+
+#     def get_queryset(self):
+#         user = self.request.user
+#         if user.role == 'ADMIN':
+#             return Notification.objects.all().order_by('-created_at')
+#         else:
+#             # Get the MLM member ID for the current user
+#             mlm_member = user.mlm_profile  # Assuming you have this related_name set up
+
+#             return Notification.objects.filter(
+#                 Q(recipient=mlm_member.id) | Q(notification_type='GENERAL', recipient__isnull=True)
+#             ).order_by('-created_at')
+
+#     def perform_create(self, serializer):
+#         logger.info(f"Creating notification: {serializer.validated_data}")
+#         if self.request.user.role != 'ADMIN':
+#             raise PermissionError("Only admin can create notifications")
+            
+#         notification_type = serializer.validated_data.get('notification_type')
+#         recipient = serializer.validated_data.get('recipient')
+        
+#         # For individual notifications, ensure recipient is set
+#         if notification_type == 'INDIVIDUAL' and not recipient:
+#             raise serializers.ValidationError({
+#                 'recipient': 'Recipient is required for individual notifications'
+#             })
+        
+#         # For general notifications, ensure recipient is None
+#         if notification_type == 'GENERAL':
+#             serializer.validated_data['recipient'] = None
+            
+#         serializer.save()
+
+#     @action(detail=True, methods=['POST'])
+#     def mark_read(self, request, pk=None):
+#         notification = self.get_object()
+#         # Allow marking as read if it's a general notification or if user is the recipient
+#         if notification.notification_type != 'GENERAL' and notification.recipient != request.user:
+#             return Response(
+#                 {"error": "Cannot mark other user's notification as read"},
+#                 status=status.HTTP_403_FORBIDDEN
+#             )
+        
+#         notification.mark_as_read()
+#         return Response({"status": "success"})
+
+#     @action(detail=False, methods=['POST'])
+#     def mark_all_read(self, request):
+#         user = request.user
+#         notifications = Notification.objects.filter(
+#             Q(recipient=user) | Q(notification_type='GENERAL', recipient__isnull=True),
+#             is_read=False
+#         )
+#         notifications.update(is_read=True, read_at=timezone.now())
+#         return Response({"status": "success"})
+
+#     @action(detail=False, methods=['GET'])
+#     def unread_count(self, request):
+#         user = request.user
+#         count = Notification.objects.filter(
+#             Q(recipient=user) | Q(notification_type='GENERAL', recipient__isnull=True),
+#             is_read=False
+#         ).count()
+#         return Response({"count": count})
+    
 class NotificationViewSet(viewsets.ModelViewSet):
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
@@ -2209,67 +2322,108 @@ class NotificationViewSet(viewsets.ModelViewSet):
         if user.role == 'ADMIN':
             return Notification.objects.all().order_by('-created_at')
         else:
-            # Get the MLM member ID for the current user
-            mlm_member = user.mlm_profile  # Assuming you have this related_name set up
+            try:
+                mlm_member = user.mlm_profile
+                return Notification.objects.filter(
+                    Q(recipient=mlm_member) | Q(notification_type='GENERAL', recipient__isnull=True)
+                ).order_by('-created_at')
+            except Exception as e:
+                logger.error(f"Error getting notifications: {str(e)}")
+                return Notification.objects.none()
 
-            return Notification.objects.filter(
-                Q(recipient=mlm_member.id) | Q(notification_type='GENERAL', recipient__isnull=True)
-            ).order_by('-created_at')
+    def create(self, request, *args, **kwargs):
+        try:
+            if request.user.role != 'ADMIN':
+                return Response(
+                    {"error": "Only admin can create notifications"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
 
-    def perform_create(self, serializer):
-        logger.info(f"Creating notification: {serializer.validated_data}")
-        if self.request.user.role != 'ADMIN':
-            raise PermissionError("Only admin can create notifications")
+            # Log the incoming data
+            logger.info(f"Creating notification with data: {request.data}")
+
+            data = request.data.copy()
+            recipient_id = data.get('recipient')
+
+            # Convert user ID to MLM member instance
+            if recipient_id and data.get('notification_type') == 'INDIVIDUAL':
+                try:
+                    mlm_member = MLMMember.objects.get(id=recipient_id)
+                    data['recipient'] = mlm_member.id
+                except MLMMember.DoesNotExist:
+                    return Response(
+                        {"error": "Selected recipient does not exist"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            serializer = self.get_serializer(data=data)
+            if not serializer.is_valid():
+                logger.error(f"Validation error: {serializer.errors}")
+                return Response(
+                    {"error": "Invalid data", "details": serializer.errors},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            notification = serializer.save()
             
-        notification_type = serializer.validated_data.get('notification_type')
-        recipient = serializer.validated_data.get('recipient')
-        
-        # For individual notifications, ensure recipient is set
-        if notification_type == 'INDIVIDUAL' and not recipient:
-            raise serializers.ValidationError({
-                'recipient': 'Recipient is required for individual notifications'
-            })
-        
-        # For general notifications, ensure recipient is None
-        if notification_type == 'GENERAL':
-            serializer.validated_data['recipient'] = None
-            
-        serializer.save()
+            return Response(
+                self.get_serializer(notification).data,
+                status=status.HTTP_201_CREATED
+            )
+
+        except Exception as e:
+            logger.error(f"Error creating notification: {str(e)}")
+            return Response(
+                {"error": "Failed to create notification"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=True, methods=['POST'])
     def mark_read(self, request, pk=None):
-        notification = self.get_object()
-        # Allow marking as read if it's a general notification or if user is the recipient
-        if notification.notification_type != 'GENERAL' and notification.recipient != request.user:
+        try:
+            notification = self.get_object()
+            if notification.notification_type != 'GENERAL':
+                if not hasattr(request.user, 'mlm_profile') or notification.recipient != request.user.mlm_profile:
+                    return Response(
+                        {"error": "Cannot mark other user's notification as read"},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+
+            notification.mark_as_read()
+            return Response({"status": "success"})
+        except Exception as e:
+            logger.error(f"Error marking notification as read: {str(e)}")
             return Response(
-                {"error": "Cannot mark other user's notification as read"},
-                status=status.HTTP_403_FORBIDDEN
+                {"error": "Failed to mark notification as read"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
-        notification.mark_as_read()
-        return Response({"status": "success"})
-
-    @action(detail=False, methods=['POST'])
-    def mark_all_read(self, request):
-        user = request.user
-        notifications = Notification.objects.filter(
-            Q(recipient=user) | Q(notification_type='GENERAL', recipient__isnull=True),
-            is_read=False
-        )
-        notifications.update(is_read=True, read_at=timezone.now())
-        return Response({"status": "success"})
-
     @action(detail=False, methods=['GET'])
     def unread_count(self, request):
-        user = request.user
-        count = Notification.objects.filter(
-            Q(recipient=user) | Q(notification_type='GENERAL', recipient__isnull=True),
-            is_read=False
-        ).count()
-        return Response({"count": count})
-    
-
-
+        try:
+            user = request.user
+            
+            # If user is MLM member, get their profile
+            if hasattr(user, 'mlm_profile'):
+                mlm_member = user.mlm_profile
+                count = Notification.objects.filter(
+                    Q(recipient=mlm_member) | Q(notification_type='GENERAL', recipient__isnull=True),
+                    is_read=False
+                ).count()
+            else:
+                # For non-MLM members, only count general notifications
+                count = Notification.objects.filter(
+                    notification_type='GENERAL',
+                    recipient__isnull=True,
+                    is_read=False
+                ).count()
+                
+            return Response({"count": count})
+        except Exception as e:
+            logger.error(f"Error getting unread count: {str(e)}")
+            return Response(
+                {"error": "Failed to get unread count"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 #------------------ admin / member orders ---------------
 
@@ -2534,6 +2688,248 @@ class MLMMemberDetailsView(APIView):
         ]
 
 
+# class MLMReportView(APIView):
+#     permission_classes = [IsAdminUser]
+
+#     def get(self, request):
+#         # Get report type from query parameters
+#         report_type = request.query_params.get('type', '')
+        
+#         # Common filtering parameters
+#         start_date = request.query_params.get('start_date')
+#         end_date = request.query_params.get('end_date')
+        
+#         try:
+#             if report_type == 'level_wise':
+#                 return self.generate_level_wise_report(start_date, end_date)
+            
+#             elif report_type == 'joining':
+#                 period = request.query_params.get('period', 'daily')
+#                 return self.generate_joining_report(period, start_date, end_date)
+            
+#             elif report_type == 'member_search':
+#                 return self.generate_member_search_report(request.query_params)
+            
+#             elif report_type == 'custom':
+#                 return self.generate_custom_report(request.query_params)
+            
+#             else:
+#                 return Response({
+#                     'error': 'Invalid report type'
+#                 }, status=status.HTTP_400_BAD_REQUEST)
+        
+#         except Exception as e:
+#             logger.error(f"Error generating report: {e}")
+#             return Response({
+#                 'error': 'Failed to generate report',
+#                 'details': str(e)
+#             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+#     def generate_level_wise_report(self, start_date=None, end_date=None):
+#         # Base queryset with optional date filtering
+#         queryset = MLMMember.objects.select_related('position', 'user')
+        
+#         if start_date:
+#             queryset = queryset.filter(join_date__date__gte=start_date)
+#         if end_date:
+#             queryset = queryset.filter(join_date__date__lte=end_date)
+        
+#         # Group by position and aggregate data
+#         level_report = queryset.values(
+#             'position__name'
+#         ).annotate(
+#             total_members=Count('id'),
+#             total_earnings=Sum('total_earnings'),
+#             total_bp=Sum('total_bp'),
+#             avg_monthly_purchase=Avg('current_month_purchase')
+#         ).order_by('position__level_order')
+        
+#         return Response({
+#             'report_type': 'level_wise',
+#             'data': list(level_report)
+#         })
+
+#     def generate_joining_report(self, period='daily', start_date=None, end_date=None):
+#         # Base queryset
+#         queryset = MLMMember.objects.select_related('user')
+        
+#         # Date filtering
+#         if start_date:
+#             queryset = queryset.filter(join_date__date__gte=start_date)
+#         if end_date:
+#             queryset = queryset.filter(join_date__date__lte=end_date)
+        
+#         # Period-based grouping
+#         if period == 'daily':
+#             queryset = queryset.annotate(
+#                 period=TruncDay('join_date')
+#             )
+#         elif period == 'weekly':
+#             queryset = queryset.annotate(
+#                 period=TruncWeek('join_date')
+#             )
+#         elif period == 'monthly':
+#             queryset = queryset.annotate(
+#                 period=TruncMonth('join_date')
+#             )
+#         else:
+#             return Response({
+#                 'error': 'Invalid period'
+#             }, status=status.HTTP_400_BAD_REQUEST)
+        
+#         # Aggregate joining data
+#         joining_report = queryset.values(
+#             'period'
+#         ).annotate(
+#             total_members=Count('id'),
+#             total_bp=Sum('total_bp'),
+#             total_earnings=Sum('total_earnings')
+#         ).order_by('period')
+        
+#         return Response({
+#             'report_type': 'joining',
+#             'period': period,
+#             'data': list(joining_report)
+#         })
+
+#     def generate_member_search_report(self, params):
+#         # Search parameters
+#         name = params.get('name')
+#         city = params.get('city')
+#         state = params.get('state')
+        
+#         # Base queryset
+#         queryset = MLMMember.objects.select_related('user')
+        
+#         # Apply filters
+#         if name:
+#             queryset = queryset.filter(
+#                 Q(user__first_name__icontains=name) | 
+#                 Q(user__last_name__icontains=name)
+#             )
+        
+#         # For city and state, you might need to adjust based on your exact model structure
+#         if city or state:
+#             # Option 1: If address is a related model
+#             queryset = queryset.filter(
+#                 Q(user__address__city__icontains=city) if city else Q(),
+#                 Q(user__address__state__icontains=state) if state else Q()
+#             )
+        
+#         # Serialize member data
+#         report_data = [{
+#             'member_id': member.member_id,
+#             'name': member.user.get_full_name(),
+#             'email': member.user.email,
+#             'phone': member.user.phone_number,
+#             'position': member.position.name if member.position else None,
+#             'total_earnings': float(member.total_earnings),
+#             'total_bp': member.total_bp,
+#             'join_date': member.join_date,
+#             # Careful address handling
+#             'city': (member.user.address.city if hasattr(member.user, 'address') and hasattr(member.user.address, 'city') else None),
+#             'state': (member.user.address.state if hasattr(member.user, 'address') and hasattr(member.user.address, 'state') else None)
+#         } for member in queryset]
+        
+#         return Response({
+#             'report_type': 'member_search',
+#             'total_count': len(report_data),
+#             'data': report_data
+#         })
+
+#     def generate_custom_report(self, params):
+#         # More flexible custom reporting
+#         queryset = MLMMember.objects.select_related('user', 'position')
+        
+#         # Possible custom filters with type hints and validation
+#         filter_options = {
+#             'min_earnings': {
+#                 'field': 'total_earnings',
+#                 'lookup': 'gte',
+#                 'type': float
+#             },
+#             'max_earnings': {
+#                 'field': 'total_earnings',
+#                 'lookup': 'lte',
+#                 'type': float
+#             },
+#             'min_bp': {
+#                 'field': 'total_bp',
+#                 'lookup': 'gte',
+#                 'type': int
+#             },
+#             'max_bp': {
+#                 'field': 'total_bp',
+#                 'lookup': 'lte',
+#                 'type': int
+#             },
+#             'position': {
+#                 'field': 'position__name',
+#                 'lookup': 'iexact',
+#                 'type': str
+#             },
+#             'is_active': {
+#                 'field': 'is_active',
+#                 'lookup': 'exact',
+#                 'type': bool
+#             },
+#             'min_current_purchase': {
+#                 'field': 'current_month_purchase',
+#                 'lookup': 'gte',
+#                 'type': float
+#             },
+#             'max_current_purchase': {
+#                 'field': 'current_month_purchase',
+#                 'lookup': 'lte',
+#                 'type': float
+#             },
+#             'sponsor_member_id': {
+#                 'field': 'sponsor__member_id',
+#                 'lookup': 'iexact',
+#                 'type': str
+#             }
+#         }
+        
+#         # Dynamic filter application
+#         filter_kwargs = {}
+        
+#         for param, value in params.items():
+#             if param in filter_options:
+#                 try:
+#                     # Convert value to appropriate type
+#                     converted_value = filter_options[param]['type'](value)
+                    
+#                     # Construct filter key
+#                     filter_key = f"{filter_options[param]['field']}__{filter_options[param]['lookup']}"
+#                     filter_kwargs[filter_key] = converted_value
+#                 except (ValueError, TypeError):
+#                     # Skip invalid filters
+#                     continue
+        
+#         # Apply filters
+#         queryset = queryset.filter(**filter_kwargs)
+        
+#         # Prepare report data
+#         report_data = [{
+#             'member_id': member.member_id,
+#             'name': member.user.get_full_name(),
+#             'email': member.user.email,
+#             'phone': member.user.phone_number,
+#             'position': member.position.name if member.position else None,
+#             'is_active': member.is_active,
+#             'total_earnings': float(member.total_earnings),
+#             'total_bp': member.total_bp,
+#             'current_month_purchase': float(member.current_month_purchase),
+#             'sponsor_member_id': member.sponsor.member_id if member.sponsor else None,
+#             'join_date': member.join_date
+#         } for member in queryset]
+        
+#         return Response({
+#             'report_type': 'custom',
+#             'total_count': len(report_data),
+#             'filter_applied': list(filter_kwargs.keys()),
+#             'data': report_data
+#         })
 class MLMReportView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -2559,6 +2955,9 @@ class MLMReportView(APIView):
             elif report_type == 'custom':
                 return self.generate_custom_report(request.query_params)
             
+            elif report_type == 'sales':
+                return self.generate_sales_report(request.query_params)
+            
             else:
                 return Response({
                     'error': 'Invalid report type'
@@ -2571,6 +2970,7 @@ class MLMReportView(APIView):
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    # Your existing methods remain unchanged
     def generate_level_wise_report(self, start_date=None, end_date=None):
         # Base queryset with optional date filtering
         queryset = MLMMember.objects.select_related('position', 'user')
@@ -2777,6 +3177,115 @@ class MLMReportView(APIView):
             'data': report_data
         })
 
+    def generate_sales_report(self, params):
+        """Generate sales report with detailed order and revenue data"""
+        # Get parameters
+        start_date = params.get('start_date')
+        end_date = params.get('end_date')
+        period = params.get('period', 'daily')
+        category = params.get('category')
+        min_amount = params.get('min_amount')
+        max_amount = params.get('max_amount')
+        order_status = params.get('order_status')
+        
+        # Base queryset
+        queryset = Order.objects.all()
+        
+        # Apply date filters
+        if start_date:
+            queryset = queryset.filter(order_date__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(order_date__date__lte=end_date)
+            
+        # Apply status filter
+        if order_status:
+            queryset = queryset.filter(status=order_status)
+            
+        # Apply amount filters
+        if min_amount:
+            queryset = queryset.filter(final_amount__gte=min_amount)
+        if max_amount:
+            queryset = queryset.filter(final_amount__lte=max_amount)
+            
+        # Apply category filter (requires joining with OrderItem and Product)
+        if category:
+            queryset = queryset.filter(
+                items__product__categories__id=category
+            ).distinct()
+        
+        # Group by period
+        if period == 'daily':
+            queryset = queryset.annotate(
+                period=TruncDay('order_date')
+            )
+        elif period == 'weekly':
+            queryset = queryset.annotate(
+                period=TruncWeek('order_date')
+            )
+        elif period == 'monthly':
+            queryset = queryset.annotate(
+                period=TruncMonth('order_date')
+            )
+        elif period == 'yearly':
+            queryset = queryset.annotate(
+                period=TruncYear('order_date')
+            )
+        else:
+            return Response({
+                'error': 'Invalid period'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Calculate aggregates by period
+        sales_report = queryset.values(
+            'period'
+        ).annotate(
+            total_orders=Count('id'),
+            total_revenue=Sum('final_amount'),
+            total_bp=Sum('total_bp'),
+            avg_order_value=Avg('final_amount')
+        ).order_by('period')
+        
+        # If category filter is applied, include the category name
+        if category:
+            try:
+                category_name = Category.objects.get(id=category).name
+                for item in sales_report:
+                    item['category_name'] = category_name
+            except Category.DoesNotExist:
+                pass
+        
+        # Calculate overall summary
+        summary = {
+            'total_revenue': queryset.aggregate(total=Sum('final_amount'))['total'] or 0,
+            'total_orders': queryset.count(),
+            'total_bp': queryset.aggregate(total=Sum('total_bp'))['total'] or 0,
+            'avg_order_value': queryset.aggregate(avg=Avg('final_amount'))['avg'] or 0
+        }
+        
+        # Format the periods properly
+        formatted_report = []
+        for item in sales_report:
+            period_date = item['period']
+            if period == 'daily':
+                period_str = period_date.strftime('%Y-%m-%d')
+            elif period == 'weekly':
+                period_str = f"Week {period_date.strftime('%U')}, {period_date.year}"
+            elif period == 'monthly':
+                period_str = period_date.strftime('%b %Y')
+            elif period == 'yearly':
+                period_str = str(period_date.year)
+                
+            formatted_item = {
+                **{k: v for k, v in item.items() if k != 'period'},
+                'period': period_str
+            }
+            formatted_report.append(formatted_item)
+            
+        return Response({
+            'report_type': 'sales',
+            'data': formatted_report,
+            'summary': summary
+        })
 
 
 class MLMDashboardView(APIView):
@@ -3660,3 +4169,398 @@ class NewsletterViewSet(viewsets.ModelViewSet):
                 'status': 'error',
                 'message': 'An error occurred while fetching subscriptions'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class MLMLiveCommissionView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, member_id):
+        try:
+            # Check authorization - admin can view any member's data, MLM member can only view their own
+            if request.user.role != 'ADMIN' and (not hasattr(request.user, 'mlm_profile') or request.user.mlm_profile.member_id != member_id):
+                return Response({
+                    'error': 'You are not authorized to view this data'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Get the target member
+            try:
+                member = MLMMember.objects.get(member_id=member_id)
+            except MLMMember.DoesNotExist:
+                return Response({
+                    'error': 'Member not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Check if member's position allows earning commissions
+            if not member.position.can_earn_commission:
+                return Response({
+                    'error': 'This member\'s position does not qualify for commissions',
+                    'current_month_estimate': "0.00",
+                    'last_month_earned': "0.00",
+                    'total_pending': "0.00",
+                    'level_breakdown': []
+                }, status=status.HTTP_200_OK)
+            
+            # Get current month and last month dates
+            today = timezone.now()
+            first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            last_month = (today.replace(day=1) - datetime.timedelta(days=1))
+            first_day_last_month = last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            last_day_last_month = first_day_current_month - datetime.timedelta(seconds=1)
+            
+            # Calculate the last month's earned commissions
+            last_month_earned = Commission.objects.filter(
+                member=member,
+                is_paid=True,
+                date__gte=first_day_last_month,
+                date__lte=last_day_last_month
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            
+            # Calculate total pending commissions
+            total_pending = Commission.objects.filter(
+                member=member,
+                is_paid=False
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            
+            # Get all orders from the current month
+            current_month_orders = Order.objects.filter(
+                order_date__gte=first_day_current_month,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            )
+            
+            # Function to get downline members by level
+            def get_downline_by_level(root_member, max_level=10):
+                result = {}
+                
+                def traverse(current_member, level=1, parent_id=None):
+                    if level > max_level:
+                        return
+                    
+                    # Get direct downline
+                    downline = MLMMember.objects.filter(sponsor=current_member)
+                    
+                    for member in downline:
+                        if level not in result:
+                            result[level] = []
+                            
+                        result[level].append({
+                            'id': member.id,
+                            'member_id': member.member_id,
+                            'user_id': member.user.id,
+                            'parent_id': parent_id
+                        })
+                        
+                        # Recursively traverse deeper levels
+                        traverse(member, level + 1, member.id)
+                
+                traverse(root_member, 1, root_member.id)
+                return result
+            
+            # Get member's downline organized by level
+            downline_by_level = get_downline_by_level(member)
+            
+            # Prepare level breakdown data
+            level_breakdown = []
+            current_month_estimate = Decimal('0.00')
+            
+            # Process each level
+            for level, members_data in downline_by_level.items():
+                # Get member IDs for this level
+                member_ids = [m['member_id'] for m in members_data]
+                user_ids = [m['user_id'] for m in members_data]
+                
+                # Skip if no members at this level
+                if not member_ids:
+                    continue
+                
+                # Get total purchases for this level
+                level_purchases = current_month_orders.filter(
+                    user_id__in=user_ids
+                ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
+                
+                # Get commission rate for this level
+                # This is a simplified example - implement your own commission logic
+                commission_rate = self.get_commission_rate(member.position, level)
+                
+                # Calculate estimated commission for this level
+                level_commission = (level_purchases * commission_rate) / 100
+                current_month_estimate += level_commission
+                
+                level_breakdown.append({
+                    'level': level,
+                    'member_count': len(member_ids),
+                    'total_purchases': str(level_purchases),
+                    'commission_rate': str(commission_rate),
+                    'estimated_commission': str(level_commission)
+                })
+            
+            # Get top performers from downline
+            top_performers = self.get_top_performers(member, downline_by_level, current_month_orders)
+            
+            # Get recent transactions
+            recent_transactions = self.get_recent_transactions(member, downline_by_level, current_month_orders)
+            
+            return Response({
+                'current_month_estimate': str(current_month_estimate),
+                'last_month_earned': str(last_month_earned),
+                'total_pending': str(total_pending),
+                'level_breakdown': level_breakdown,
+                'top_performers': top_performers,
+                'recent_transactions': recent_transactions
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def get_commission_rate(self, position, level):
+        """
+        Determine commission rate based on position and level
+        This is just an example - implement your specific commission structure
+        """
+        # Base commission rate from position
+        base_rate = position.commission_percentage
+        
+        # Apply level-based reduction
+        # Example: Level 1 = 100% of base rate, Level 2 = 50%, Level 3 = 25%, etc.
+        level_multipliers = {
+            1: 1.0,  # 100% of base rate
+            2: 0.5,  # 50% of base rate
+            3: 0.25, # 25% of base rate
+            4: 0.125, # 12.5% of base rate
+            5: 0.0625 # 6.25% of base rate
+        }
+        
+        multiplier = level_multipliers.get(level, 0.03125)  # Default to 3.125% for higher levels
+        
+        return base_rate * multiplier
+    
+    def get_top_performers(self, member, downline_by_level, current_month_orders):
+        """Get top performing downline members by purchase volume"""
+        try:
+            # Flatten downline data
+            all_downline = []
+            for level, members in downline_by_level.items():
+                for m in members:
+                    m['level'] = level
+                    all_downline.append(m)
+            
+            # Get user IDs
+            user_ids = [m['user_id'] for m in all_downline]
+            
+            if not user_ids:
+                return []
+            
+            # Get orders and aggregate by user
+            user_purchases = current_month_orders.filter(
+                user_id__in=user_ids
+            ).values('user_id').annotate(
+                total_purchases=Sum('final_amount')
+            ).order_by('-total_purchases')[:5]  # Top 5 performers
+            
+            # Match with downline data and add member details
+            top_performers = []
+            for purchase in user_purchases:
+                user_id = purchase['user_id']
+                
+                # Find member data
+                member_data = next((m for m in all_downline if m['user_id'] == user_id), None)
+                if not member_data:
+                    continue
+                
+                # Get MLM member details
+                try:
+                    mlm_member = MLMMember.objects.select_related('user', 'position').get(user_id=user_id)
+                    
+                    # Calculate commission for this member
+                    commission_rate = self.get_commission_rate(member.position, member_data['level'])
+                    commission_amount = (purchase['total_purchases'] * commission_rate) / 100
+                    
+                    top_performers.append({
+                        'member_id': mlm_member.member_id,
+                        'name': f"{mlm_member.user.first_name} {mlm_member.user.last_name}",
+                        'level': member_data['level'],
+                        'position': mlm_member.position.name,
+                        'total_purchases': str(purchase['total_purchases']),
+                        'your_commission': str(commission_amount)
+                    })
+                except MLMMember.DoesNotExist:
+                    continue
+            
+            return top_performers
+            
+        except Exception as e:
+            return []
+    
+    def get_recent_transactions(self, member, downline_by_level, current_month_orders):
+        """Get recent transactions from downline members"""
+        try:
+            # Flatten downline data
+            all_downline = []
+            for level, members in downline_by_level.items():
+                for m in members:
+                    m['level'] = level
+                    all_downline.append(m)
+            
+            # Get user IDs
+            user_ids = [m['user_id'] for m in all_downline]
+            
+            if not user_ids:
+                return []
+            
+            # Get recent orders
+            recent_orders = current_month_orders.filter(
+                user_id__in=user_ids
+            ).order_by('-order_date')[:10]  # Latest 10 orders
+            
+            recent_transactions = []
+            for order in recent_orders:
+                # Find member data for this order
+                member_data = next((m for m in all_downline if m['user_id'] == order.user_id), None)
+                if not member_data:
+                    continue
+                
+                # Get MLM member details
+                try:
+                    mlm_member = MLMMember.objects.select_related('user').get(user_id=order.user_id)
+                    
+                    # Calculate commission for this order
+                    commission_rate = self.get_commission_rate(member.position, member_data['level'])
+                    commission_amount = (order.final_amount * commission_rate) / 100
+                    
+                    recent_transactions.append({
+                        'date': order.order_date,
+                        'member_name': f"{mlm_member.user.first_name} {mlm_member.user.last_name}",
+                        'level': member_data['level'],
+                        'order_id': order.order_number,
+                        'amount': str(order.final_amount),
+                        'your_commission': str(commission_amount)
+                    })
+                    
+                except MLMMember.DoesNotExist:
+                    continue
+            
+            return recent_transactions
+            
+        except Exception as e:
+            return []
+
+
+class AdminCustomerViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for admin to manage customers
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAdminUser]
+    
+    def get_queryset(self):
+        # Base queryset - only CUSTOMER role users
+        queryset = User.objects.filter(role='CUSTOMER').annotate(
+            order_count=Count('orders')
+        ).select_related(
+            'customer'  # If you have a customer profile model
+        ).prefetch_related(
+            'addresses'
+        )
+        
+        # Apply filters
+        search = self.request.query_params.get('search')
+        date_joined = self.request.query_params.get('date_joined')
+        has_orders = self.request.query_params.get('has_orders')
+        
+        # Search filter
+        if search:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search) |
+                Q(phone_number__icontains=search)
+            )
+        
+        # Date joined filter
+        if date_joined:
+            queryset = queryset.filter(date_joined__date=date_joined)
+        
+        # Has orders filter
+        if has_orders == 'true':
+            queryset = queryset.filter(order_count__gt=0)
+        elif has_orders == 'false':
+            queryset = queryset.filter(order_count=0)
+        
+        return queryset.order_by('-date_joined')
+    
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return CustomerDetailSerializer
+        return CustomerListSerializer
+    
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['get'])
+    def orders(self, request, pk=None):
+        """Get all orders for a specific customer"""
+        customer = self.get_object()
+        orders = Order.objects.filter(user=customer).order_by('-order_date')
+        serializer = OrderSerializer(orders, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Get customer statistics for admin dashboard"""
+        # Total customers
+        total_customers = User.objects.filter(role='CUSTOMER').count()
+        
+        # New customers this month
+        first_day_of_month = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        new_this_month = User.objects.filter(
+            role='CUSTOMER',
+            date_joined__gte=first_day_of_month
+        ).count()
+        
+        # Active customers (placed order in last 30 days)
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        active_customers = User.objects.filter(
+            role='CUSTOMER',
+            orders__order_date__gte=thirty_days_ago
+        ).distinct().count()
+        
+        # Customers with orders
+        with_orders = User.objects.filter(
+            role='CUSTOMER',
+            orders__isnull=False
+        ).distinct().count()
+        
+        # Monthly growth data (last 6 months)
+        six_months_ago = timezone.now() - timedelta(days=180)
+        monthly_growth = User.objects.filter(
+            role='CUSTOMER',
+            date_joined__gte=six_months_ago
+        ).annotate(
+            month=TruncMonth('date_joined')
+        ).values('month').annotate(
+            count=Count('id')
+        ).order_by('month')
+        
+        return Response({
+            'total_customers': total_customers,
+            'new_this_month': new_this_month,
+            'active_customers': active_customers,
+            'with_orders': with_orders,
+            'monthly_growth': [
+                {
+                    'month': item['month'].strftime('%b %Y'),
+                    'count': item['count']
+                }
+                for item in monthly_growth
+            ]
+        })
