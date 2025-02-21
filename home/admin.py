@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from utils.email_utils import send_welcome_email
 # Register your models here.
 from .models import (
     User, PhoneOTP, Product, Customer, MLMMember, Order, OrderItem, Commission,
@@ -206,3 +207,6 @@ class NewsletterAdmin(admin.ModelAdmin):
             # You can add email notification logic here
             pass
         super().save_model(request, obj, form, change)
+
+
+

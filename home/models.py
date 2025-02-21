@@ -234,6 +234,23 @@ class Product(models.Model):
     def get_absolute_url(self):
         return f"/product/{self.slug}/"
 
+    def get_feature_image_url(self, request=None):
+        """
+        Get the full URL of the feature image
+        """
+        try:
+            image = self.images.filter(is_feature=True).first() or self.images.first()
+            if image and image.image:
+                if request:
+                    # If request is provided, use build_absolute_uri
+                    return request.build_absolute_uri(image.image.url)
+                # Fallback to a more generic method
+                from django.conf import settings
+                return f"{settings.SITE_URL}{image.image.url}"
+            return None
+        except Exception as e:
+            logger.error(f"Error getting feature image URL: {str(e)}")
+            return None
 
 class ProductFeature(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='features')
@@ -346,7 +363,7 @@ class Position(models.Model):
         ordering = ['level_order']
 
     def __str__(self):
-        return f"{self.name} (BP Required: {self.bp_required})"
+        return f"{self.name} (BP Required: {self.bp_required_min}-{self.bp_required_max})"
 
 
 class MLMMember(models.Model):
@@ -382,7 +399,7 @@ class MLMMember(models.Model):
     def check_position_upgrade(self):
         """Check and upgrade position based on BP points"""
         higher_position = Position.objects.filter(
-            bp_required__lte=self.total_bp,
+            bp_required_min__lte=self.total_bp,
             level_order__gt=self.position.level_order,
             is_active=True
         ).order_by('level_order').first()

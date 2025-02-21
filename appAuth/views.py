@@ -1,5 +1,6 @@
 import requests
 import logging
+import re
 import uuid
 import datetime
 from rest_framework import serializers
@@ -16,7 +17,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -38,9 +39,13 @@ from django.http import FileResponse
 from utils.invoice_generator import generate_invoice_pdf
 from rest_framework.decorators import api_view, permission_classes
 from decimal import Decimal
- 
+from django.db import transaction
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+from django.utils.html import strip_tags
+from utils.email_utils import send_welcome_email
 
- 
+
 logger = logging.getLogger(__name__)
 
 def send_otp_sms(phone_number, otp):
@@ -607,6 +612,50 @@ class MLMMemberViewSet(viewsets.ModelViewSet):
             return MLMMemberListSerializer
         return MLMMemberSerializer
 
+    def create(self, request, *args, **kwargs):
+        # Use the existing serializer
+        serializer = self.get_serializer(data=request.data)
+        
+        # Validate the data
+        serializer.is_valid(raise_exception=True)
+        
+        try:
+            # Perform the creation
+            member = serializer.save()
+            
+            # Send welcome email if email is provided
+            if member.user.email:
+                # Get the password from the request data
+                password = request.data.get('password')
+                
+                # Find the sponsor if applicable
+                sponsor = None
+                if 'sponsor_id' in request.data:
+                    try:
+                        sponsor = MLMMember.objects.get(member_id=request.data.get('sponsor_id'))
+                    except MLMMember.DoesNotExist:
+                        # Log that sponsor was not found, but continue
+                        logger.warning(f"Sponsor with ID {request.data.get('sponsor_id')} not found")
+                
+                # Send welcome email
+                send_welcome_email(
+                    member.user, 
+                    password, 
+                    sponsor
+                )
+            
+            # Prepare response
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        
+        except Exception as e:
+            # Log the error
+            logger.error(f"Error creating MLM member: {str(e)}")
+            return Response(
+                {'error': 'Failed to create MLM member'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
     def get_queryset(self):
         queryset = MLMMember.objects.select_related(
             'user', 
@@ -1624,6 +1673,19 @@ class VerifyPaymentView(APIView):
 
     def post(self, request):
         try:
+
+            # Log the incoming request data
+            logger.info(f"Verify Payment Request Data: {request.data}")
+
+            # Get payment details
+            payment_id = request.data.get('razorpay_payment_id')
+            order_id = request.data.get('razorpay_order_id')
+            signature = request.data.get('razorpay_signature')
+
+            # Additional logging
+            logger.info(f"Payment ID: {payment_id}")
+            logger.info(f"Order ID: {order_id}")
+
             # Get payment details
             payment_id = request.data.get('razorpay_payment_id')
             order_id = request.data.get('razorpay_order_id')
@@ -3515,6 +3577,7 @@ class MLMDashboardView(APIView):
         """
         try:
             from home.models import Product
+            from django.conf import settings
             featured_products = Product.objects.filter(
                 is_featured=True, 
                 is_active=True
@@ -3524,8 +3587,17 @@ class MLMDashboardView(APIView):
                 'id': product.id,
                 'name': product.name,
                 'price': float(product.selling_price),
-                'image': product.images.first().image.url if product.images.exists() else None
+                'image': product.get_feature_image_url(self.request),
+                'slug': product.slug
             } for product in featured_products]
+            # Use the serializer to generate full URLs
+            # serializer = ProductListSerializer(
+            #     featured_products, 
+            #     many=True, 
+            #     context={'request': self.request}  # Pass request to serializer
+            # )
+            
+            # return serializer.data
         except Exception as e:
             logger.error(f"Error getting featured products: {str(e)}")
             return []
@@ -3794,12 +3866,143 @@ class AdminDashboardView(APIView):
 
 
 
+# class MLMMemberRegistrationView(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request):
+#         try:
+#             # Validate current user is an MLM member
+#             if request.user.role != 'MLM_MEMBER':
+#                 return Response({
+#                     'error': 'Only MLM members can register new members'
+#                 }, status=status.HTTP_403_FORBIDDEN)
+
+#             # Get current MLM member (sponsor)
+#             current_member = MLMMember.objects.get(user=request.user)
+
+#             # Extract document related data
+#             documents = request.FILES.getlist('document_file')
+#             document_types = request.POST.getlist('document_types[]')
+#             document_numbers = {}
+            
+#             # Process document numbers from the request
+#             for doc_type in ['AADHAR', 'PAN', 'BANK_STATEMENT', 'CANCELLED_CHEQUE']:
+#                 if doc_type in request.POST:
+#                     document_numbers[doc_type] = request.POST.get(doc_type)
+
+#             # Create context with document data
+#             serializer_context = {
+#                 'document_types': document_types,
+#                 'document_numbers': document_numbers
+#             }
+
+#             # Validate input data
+#             serializer = MLMMemberRegistrationSerializer(
+#                 data=request.POST,
+#                 context=serializer_context
+#             )
+
+#             if not serializer.is_valid():
+#                 return Response({
+#                     'error': 'Invalid registration data',
+#                     'details': serializer.errors
+#                 }, status=status.HTTP_400_BAD_REQUEST)
+
+#             # Create new user
+#             new_user = User.objects.create_user(
+#                 username=self.generate_unique_username(serializer.validated_data['phone_number']),
+#                 password=serializer.validated_data['password'],
+#                 phone_number=serializer.validated_data['phone_number'],
+#                 first_name=serializer.validated_data['first_name'],
+#                 last_name=serializer.validated_data.get('last_name', ''),
+#                 email=serializer.validated_data.get('email', ''),
+#                 role='MLM_MEMBER'
+#             )
+
+#             try:
+#                 # Create MLM Member
+#                 new_mlm_member = MLMMember.objects.create(
+#                     user=new_user,
+#                     sponsor=current_member,
+#                     position=self.determine_position(current_member),
+#                     member_id=self.generate_member_id(),
+#                     is_active=True,
+#                     join_date=timezone.now()
+#                 )
+
+#                 # Process KYC Documents
+#                 kyc_docs_list = []
+#                 for doc, doc_type in zip(documents, document_types):
+#                     try:
+#                         kyc_doc = KYCDocument.objects.create(
+#                             mlm_member=new_mlm_member,
+#                             document_file=doc,
+#                             document_type=doc_type,
+#                             document_number=document_numbers.get(doc_type, ''),
+#                             status='PENDING'
+#                         )
+#                         kyc_docs_list.append(kyc_doc)
+#                     except Exception as doc_error:
+#                         logger.error(f"Error creating KYC document: {str(doc_error)}")
+#                         # Cleanup
+#                         new_user.delete()
+#                         new_mlm_member.delete()
+#                         for doc in kyc_docs_list:
+#                             doc.delete()
+#                         raise Exception(f"Failed to create KYC document: {str(doc_error)}")
+
+#                 # Create notification
+#                 Notification.objects.create(
+#                     title='New MLM Member Registration',
+#                     message=f'New member {new_user.get_full_name()} registered by {current_member.user.get_full_name()}',
+#                     notification_type='SYSTEM'
+#                 )
+
+#                 return Response({
+#                     'status': 'success',
+#                     'message': 'Member registered successfully',
+#                     'member_details': {
+#                         'member_id': new_mlm_member.member_id,
+#                         'username': new_user.username,
+#                         'full_name': new_user.get_full_name(),
+#                         'email': new_user.email,
+#                         'phone': new_user.phone_number,
+#                         'sponsor': current_member.member_id,
+#                         'position': new_mlm_member.position.name
+#                     }
+#                 })
+
+#             except Exception as e:
+#                 logger.error(f"Error in member creation: {str(e)}")
+#                 if 'new_user' in locals():
+#                     new_user.delete()
+#                 raise
+
+#         except Exception as e:
+#             logger.error(f"MLM Member Registration Error: {str(e)}")
+#             return Response({
+#                 'error': str(e)
+#             }, status=status.HTTP_400_BAD_REQUEST)
+
+#     def generate_unique_username(self, phone_number):
+#         base_username = f"MLM_{phone_number}"
+#         unique_suffix = str(uuid.uuid4())[:8]
+#         return f"{base_username}_{unique_suffix}"
+
+#     def generate_member_id(self):
+#         while True:
+#             member_id = f"MLM{random.randint(10000, 99999)}"
+#             if not MLMMember.objects.filter(member_id=member_id).exists():
+#                 return member_id
+
+#     def determine_position(self, sponsor):
+#         return sponsor.position
 class MLMMemberRegistrationView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         try:
-            # Validate current user is an MLM member
+            # Validate that the current user is an MLM member
             if request.user.role != 'MLM_MEMBER':
                 return Response({
                     'error': 'Only MLM members can register new members'
@@ -3807,61 +4010,87 @@ class MLMMemberRegistrationView(APIView):
 
             # Get current MLM member (sponsor)
             current_member = MLMMember.objects.get(user=request.user)
-
+            
+            # Get current member's position level
+            current_level = current_member.position.level_order if current_member.position else 0
+            
+            # Members can only create members up to level 2
+            if current_level > 2:
+                # Limit to creating only level 1 or 2 members
+                max_creation_level = 2
+            else:
+                # Can only create members of lower level than themselves
+                max_creation_level = current_level - 1
+                
+            if max_creation_level < 1:
+                return Response({
+                    'error': 'You do not have permission to register new members with your current position'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
             # Extract document related data
             documents = request.FILES.getlist('document_file')
             document_types = request.POST.getlist('document_types[]')
-            document_numbers = {}
             
-            # Process document numbers from the request
-            for doc_type in ['AADHAR', 'PAN', 'BANK_STATEMENT', 'CANCELLED_CHEQUE']:
-                if doc_type in request.POST:
-                    document_numbers[doc_type] = request.POST.get(doc_type)
-
-            # Create context with document data
-            serializer_context = {
-                'document_types': document_types,
-                'document_numbers': document_numbers
-            }
-
-            # Validate input data
-            serializer = MLMMemberRegistrationSerializer(
-                data=request.POST,
-                context=serializer_context
-            )
-
-            if not serializer.is_valid():
+            # Validate basic form data
+            validation_result = self.validate_form_data(request.POST)
+            if not validation_result['valid']:
                 return Response({
-                    'error': 'Invalid registration data',
-                    'details': serializer.errors
+                    'error': validation_result['message']
                 }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Store password for email
+            password = request.POST.get('password')
 
-            # Create new user
-            new_user = User.objects.create_user(
-                username=self.generate_unique_username(serializer.validated_data['phone_number']),
-                password=serializer.validated_data['password'],
-                phone_number=serializer.validated_data['phone_number'],
-                first_name=serializer.validated_data['first_name'],
-                last_name=serializer.validated_data.get('last_name', ''),
-                email=serializer.validated_data.get('email', ''),
-                role='MLM_MEMBER'
-            )
+            # Create new member with transaction to ensure all operations succeed or fail together
+            with transaction.atomic():
+                # Create new user
+                new_user = User.objects.create_user(
+                    username=request.POST.get('username'),
+                    password=request.POST.get('password'),
+                    phone_number=request.POST.get('phone_number'),
+                    first_name=request.POST.get('first_name'),
+                    last_name=request.POST.get('last_name', ''),
+                    email=request.POST.get('email', ''),
+                    role='MLM_MEMBER'
+                )
 
-            try:
+                # Determine position based on level restriction
+                # Position level 1 is the lowest level
+                position = Position.objects.filter(
+                    level_order__lte=max_creation_level,
+                    is_active=True
+                ).order_by('level_order').first()
+                
+                if not position:
+                    raise ValueError("No valid position available for new member")
+
                 # Create MLM Member
                 new_mlm_member = MLMMember.objects.create(
                     user=new_user,
                     sponsor=current_member,
-                    position=self.determine_position(current_member),
-                    member_id=self.generate_member_id(),
-                    is_active=True,
-                    join_date=timezone.now()
+                    position=position,
+                    is_active=True
                 )
 
                 # Process KYC Documents
                 kyc_docs_list = []
+                
+                # Create a mapping of document types to their numbers
+                document_numbers = {}
+                for doc_type in ['AADHAR', 'PAN']:
+                    if doc_type in request.POST:
+                        document_numbers[doc_type] = request.POST.get(doc_type)
+                
                 for doc, doc_type in zip(documents, document_types):
                     try:
+                        # Validate document numbers
+                        if doc_type == 'AADHAR':
+                            if not re.match(r'^\d{12}$', document_numbers.get(doc_type, '')):
+                                raise ValueError("Aadhar number must be exactly 12 digits")
+                        elif doc_type == 'PAN':
+                            if not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$', document_numbers.get(doc_type, '')):
+                                raise ValueError("PAN number must be in format AAAAA0000A")
+                        
                         kyc_doc = KYCDocument.objects.create(
                             mlm_member=new_mlm_member,
                             document_file=doc,
@@ -3872,19 +4101,20 @@ class MLMMemberRegistrationView(APIView):
                         kyc_docs_list.append(kyc_doc)
                     except Exception as doc_error:
                         logger.error(f"Error creating KYC document: {str(doc_error)}")
-                        # Cleanup
-                        new_user.delete()
-                        new_mlm_member.delete()
-                        for doc in kyc_docs_list:
-                            doc.delete()
-                        raise Exception(f"Failed to create KYC document: {str(doc_error)}")
+                        raise ValueError(f"Failed to process document: {str(doc_error)}")
+                    
+                # Send welcome email if email is provided
+                if new_user.email:
+                    try:
+                        # Pass the plain text password only for email purposes
+                        send_welcome_email(new_user, password, current_member)
+                    except Exception as email_error:
+                        logger.error(f"Error sending welcome email: {str(email_error)}")
+                        # Don't fail the registration if email fails
+                        # You might want to log this or set a flag to retry later
 
-                # Create notification
-                Notification.objects.create(
-                    title='New MLM Member Registration',
-                    message=f'New member {new_user.get_full_name()} registered by {current_member.user.get_full_name()}',
-                    notification_type='SYSTEM'
-                )
+                # Create notification about new member registration if needed
+                # Notification.objects.create(...)
 
                 return Response({
                     'status': 'success',
@@ -3896,36 +4126,74 @@ class MLMMemberRegistrationView(APIView):
                         'email': new_user.email,
                         'phone': new_user.phone_number,
                         'sponsor': current_member.member_id,
-                        'position': new_mlm_member.position.name
+                        'position': position.name,
+                        'level': position.level_order
                     }
                 })
 
-            except Exception as e:
-                logger.error(f"Error in member creation: {str(e)}")
-                if 'new_user' in locals():
-                    new_user.delete()
-                raise
-
-        except Exception as e:
-            logger.error(f"MLM Member Registration Error: {str(e)}")
+        except User.DoesNotExist:
             return Response({
-                'error': str(e)
+                'error': 'User does not exist'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except MLMMember.DoesNotExist:
+            return Response({
+                'error': 'MLM member profile not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except ValueError as ve:
+            return Response({
+                'error': str(ve)
             }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error in MLM member registration: {str(e)}")
+            return Response({
+                'error': f'Registration failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def generate_unique_username(self, phone_number):
-        base_username = f"MLM_{phone_number}"
-        unique_suffix = str(uuid.uuid4())[:8]
-        return f"{base_username}_{unique_suffix}"
-
-    def generate_member_id(self):
-        while True:
-            member_id = f"MLM{random.randint(10000, 99999)}"
-            if not MLMMember.objects.filter(member_id=member_id).exists():
-                return member_id
-
-    def determine_position(self, sponsor):
-        return sponsor.position
+    def validate_form_data(self, data):
+        # Username validation
+        username = data.get('username', '')
+        if not username or len(username) < 5:
+            return {'valid': False, 'message': 'Username must be at least 5 characters'}
         
+        if User.objects.filter(username=username).exists():
+            return {'valid': False, 'message': 'Username is already taken'}
+        
+        # Password validation
+        password = data.get('password', '')
+        if not password or len(password) < 6:
+            return {'valid': False, 'message': 'Password must be at least 6 characters'}
+        
+        # Phone number validation
+        phone_number = data.get('phone_number', '')
+        if not re.match(r'^\d{10}$', phone_number):
+            return {'valid': False, 'message': 'Phone number must be 10 digits'}
+        
+        if User.objects.filter(phone_number=phone_number).exists():
+            return {'valid': False, 'message': 'Phone number is already registered'}
+        
+        # Email validation if provided
+        email = data.get('email', '')
+        if email and not re.match(r'\S+@\S+\.\S+', email):
+            return {'valid': False, 'message': 'Invalid email format'}
+        
+        if email and User.objects.filter(email=email).exists():
+            return {'valid': False, 'message': 'Email is already registered'}
+        
+        # Required fields validation
+        if not data.get('first_name', ''):
+            return {'valid': False, 'message': 'First name is required'}
+        
+        # Aadhar validation
+        aadhar = data.get('AADHAR', '')
+        if not re.match(r'^\d{12}$', aadhar):
+            return {'valid': False, 'message': 'Aadhar number must be exactly 12 digits'}
+        
+        # PAN validation
+        pan = data.get('PAN', '')
+        if not re.match(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$', pan):
+            return {'valid': False, 'message': 'PAN number must be in format AAAAA0000A'}
+        
+        return {'valid': True}
 
 
 
@@ -4564,3 +4832,123 @@ class AdminCustomerViewSet(viewsets.ReadOnlyModelViewSet):
                 for item in monthly_growth
             ]
         })
+    
+class OrderTrackingView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        try:
+            # Get order number from query parameters
+            order_number = request.query_params.get('order_number', '')
+            
+            if not order_number:
+                return Response(
+                    {'error': 'Order number is required'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Find the order
+            order = get_object_or_404(Order, order_number=order_number)
+            
+            # Get tracking information
+            tracking_info = self.get_tracking_info(order)
+            
+            return Response(tracking_info)
+            
+        except Order.DoesNotExist:
+            return Response(
+                {'error': 'Order not found. Please check the order number and try again.'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Error in order tracking: {str(e)}")
+            return Response(
+                {'error': 'An error occurred while fetching order tracking information'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get_tracking_info(self, order):
+        """Generate tracking information based on order status and dates"""
+        
+        # Initialize dates based on order status
+        confirmed_date = None
+        shipped_date = None
+        delivered_date = None
+        expected_delivery = None
+        current_location = None
+        
+        # Set tracking info based on order status
+        if order.status == 'CONFIRMED':
+            confirmed_date = order.updated_at
+            expected_delivery = (order.order_date + timedelta(days=5)).strftime('%Y-%m-%d')
+            current_location = "Order Processing Center"
+            
+        elif order.status == 'SHIPPED':
+            confirmed_date = order.order_date + timedelta(days=1)  # Estimate confirmation 1 day after order
+            shipped_date = order.updated_at
+            expected_delivery = (shipped_date + timedelta(days=3)).strftime('%Y-%m-%d')
+            current_location = "In Transit"
+            
+        elif order.status == 'DELIVERED':
+            confirmed_date = order.order_date + timedelta(days=1)
+            shipped_date = order.order_date + timedelta(days=2)
+            delivered_date = order.updated_at
+            current_location = "Delivered"
+            
+        elif order.status == 'CANCELLED':
+            current_location = "Order Cancelled"
+            
+        else:  # PENDING
+            expected_delivery = (order.order_date + timedelta(days=7)).strftime('%Y-%m-%d')
+            current_location = "Order Received"
+        
+        # Construct the tracking info response
+        tracking_info = {
+            'id': order.id,
+            'order_number': order.order_number,
+            'status': order.status,
+            'order_date': order.order_date.isoformat(),
+            'confirmed_date': confirmed_date.isoformat() if confirmed_date else None,
+            'shipped_date': shipped_date.isoformat() if shipped_date else None,
+            'delivered_date': delivered_date.isoformat() if delivered_date else None,
+            'expected_delivery': expected_delivery,
+            'current_location': current_location,
+            'total_amount': float(order.total_amount),
+            'final_amount': float(order.final_amount),
+            # Include customer details if needed
+            'shipping_address': order.shipping_address,
+            # You can add more fields here as needed
+        }
+        
+        return tracking_info
+    
+
+class CheckUsernameView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            username = request.query_params.get('username', '')
+            
+            if not username:
+                return Response(
+                    {'error': 'Username parameter is required'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Check if username exists
+            exists = User.objects.filter(username=username).exists()
+            
+            return Response({
+                'available': not exists,
+                'message': 'Username is available' if not exists else 'Username is already taken'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error checking username: {str(e)}")
+            return Response(
+                {'error': 'An error occurred while checking username'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+

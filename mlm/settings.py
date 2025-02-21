@@ -77,7 +77,9 @@ ROOT_URLCONF = 'mlm.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [
+            os.path.join(BASE_DIR, 'templates'),
+        ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -111,6 +113,20 @@ DATABASES = {
         'PORT': '5432'
     }
 }  
+
+# Site Information
+SITE_NAME = 'Herbal Power'
+SITE_URL = 'https://herbalpower.trygon.tech/'  # Change to your actual domain
+CONTACT_EMAIL = 'support@herbalpower.com'  # Change to your support email
+
+# Email Configuration
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # e.g., smtp.gmail.com
+EMAIL_PORT = 587  # or 465 for SSL
+EMAIL_USE_TLS = True  # or False if using SSL
+EMAIL_HOST_USER = 'trygontechnologies@gmail.com'
+EMAIL_HOST_PASSWORD = 'Trygon@123!'  # Consider using environment variables for security
+DEFAULT_FROM_EMAIL = 'Your MLM Platform <noreply@yourmlmwebsite.com>'
 
 
 # Password validation

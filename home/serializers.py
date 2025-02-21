@@ -506,9 +506,15 @@ class PositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Position
         fields = [
-            'id', 'name', 'bp_required_min', 'bp_required_max',
-            'discount_percentage', 'commission_percentage',
-            'can_earn_commission', 'monthly_quota', 'level_order',
+            'id', 
+            'name', 
+            'bp_required_min', 
+            'bp_required_max',
+            'discount_percentage', 
+            'commission_percentage',
+            'can_earn_commission', 
+            'monthly_quota', 
+            'level_order',
             'is_active'
         ]
 
