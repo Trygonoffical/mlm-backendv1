@@ -17,7 +17,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer 
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -1681,15 +1681,16 @@ class VerifyPaymentView(APIView):
             payment_id = request.data.get('razorpay_payment_id')
             order_id = request.data.get('razorpay_order_id')
             signature = request.data.get('razorpay_signature')
+            update_stock = request.data.get('update_stock', False)
 
             # Additional logging
             logger.info(f"Payment ID: {payment_id}")
             logger.info(f"Order ID: {order_id}")
 
-            # Get payment details
-            payment_id = request.data.get('razorpay_payment_id')
-            order_id = request.data.get('razorpay_order_id')
-            signature = request.data.get('razorpay_signature')
+            # # Get payment details
+            # payment_id = request.data.get('razorpay_payment_id')
+            # order_id = request.data.get('razorpay_order_id')
+            # signature = request.data.get('razorpay_signature')
 
             # Get the order
             order = Order.objects.get(razorpay_order_id=order_id)
@@ -1723,6 +1724,20 @@ class VerifyPaymentView(APIView):
 
                     # Check for position upgrade
                     mlm_member.check_position_upgrade()
+                # Update product stock if requested
+                if update_stock:
+                    for item in order.items.all():
+                        product = item.product
+                        if product.stock >= item.quantity:
+                            product.stock -= item.quantity
+                            product.save()
+                            logger.info(f"Updated stock for product {product.id}, new stock: {product.stock}")
+                        else:
+                            logger.warning(f"Insufficient stock for product {product.id}: requested {item.quantity}, available {product.stock}")
+                            # We still proceed with the order even if stock is insufficient
+                            # This is to avoid issues with the customer who already paid
+                            product.stock = 0  # Set to zero instead of negative
+                            product.save()
 
                 return Response({
                     'status': 'success',
@@ -4952,3 +4967,178 @@ class CheckUsernameView(APIView):
             )
         
 
+class UpdateStockView(APIView):
+    """
+    API endpoint to update product stock after successful payment
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        try:
+            items = request.data.get('items', [])
+            
+            if not items:
+                return Response(
+                    {'error': 'No items provided'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            with transaction.atomic():
+                updated_items = []
+                out_of_stock_items = []
+                
+                for item in items:
+                    product_id = item.get('product_id')
+                    quantity = item.get('quantity', 0)
+                    
+                    try:
+                        product = Product.objects.select_for_update().get(id=product_id)
+                        
+                        # Check if sufficient stock is available
+                        if product.stock < quantity:
+                            out_of_stock_items.append({
+                                'product_id': product_id,
+                                'name': product.name,
+                                'available_stock': product.stock,
+                                'requested_quantity': quantity
+                            })
+                            continue
+                        
+                        # Update the stock
+                        product.stock -= quantity
+                        product.save()
+                        
+                        updated_items.append({
+                            'product_id': product_id,
+                            'name': product.name,
+                            'previous_stock': product.stock + quantity,
+                            'new_stock': product.stock
+                        })
+                        
+                    except Product.DoesNotExist:
+                        return Response(
+                            {'error': f'Product with ID {product_id} not found'}, 
+                            status=status.HTTP_404_NOT_FOUND
+                        )
+                
+                if out_of_stock_items:
+                    # If any items are out of stock, rollback transaction and return error
+                    transaction.set_rollback(True)
+                    return Response({
+                        'success': False,
+                        'message': 'Some items are out of stock',
+                        'out_of_stock_items': out_of_stock_items
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                return Response({
+                    'success': True,
+                    'message': 'Stock updated successfully',
+                    'updated_items': updated_items
+                })
+                
+        except Exception as e:
+            logger.error(f"Error updating stock: {str(e)}")
+            return Response(
+                {'error': 'An error occurred while updating stock'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class CheckStockAvailabilityView(APIView):
+    """
+    API endpoint to check if requested products are in stock
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        try:
+            items = request.data.get('items', [])
+            
+            if not items:
+                return Response(
+                    {'success': False, 'message': 'No items provided'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            out_of_stock_items = []
+            
+            for item in items:
+                product_id = item.get('product_id')
+                quantity = item.get('quantity', 0)
+                
+                try:
+                    product = Product.objects.get(id=product_id)
+                    
+                    # Check if sufficient stock is available
+                    if product.stock < quantity:
+                        out_of_stock_items.append({
+                            'product_id': product_id,
+                            'name': product.name,
+                            'available_stock': product.stock,
+                            'requested_quantity': quantity
+                        })
+                        
+                except Product.DoesNotExist:
+                    return Response(
+                        {'success': False, 'message': f'Product with ID {product_id} not found'}, 
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            
+            if out_of_stock_items:
+                return Response({
+                    'success': False,
+                    'message': 'Some items are out of stock',
+                    'out_of_stock_items': out_of_stock_items
+                })
+            
+            return Response({
+                'success': True,
+                'message': 'All items are in stock'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error checking stock availability: {str(e)}")
+            return Response(
+                {'success': False, 'message': 'An error occurred while checking stock'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+class OrderCancellationView(APIView):
+    """
+    API endpoint to cancel an incomplete order
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, order_id):
+        try:
+            order = Order.objects.get(id=order_id, user=request.user)
+            
+            # Only allow cancellation for pending orders
+            if order.status != 'PENDING':
+                return Response(
+                    {'error': 'Only pending orders can be cancelled'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Update order status
+            order.status = 'CANCELLED'
+            order.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Order cancelled successfully'
+            })
+            
+        except Order.DoesNotExist:
+            return Response(
+                {'error': 'Order not found or you do not have permission to cancel it'}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Error cancelling order: {str(e)}")
+            return Response(
+                {'error': 'An error occurred while cancelling the order'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
