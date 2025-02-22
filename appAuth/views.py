@@ -2619,57 +2619,194 @@ class MLMOrderListView(APIView):
         return Response(serializer.data)
     
 
-class MLMMemberTreeView(APIView):
-    permission_classes = [IsAuthenticated]
+# class MLMMemberTreeView(APIView):
+#     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        # Determine the base member for the tree view
-        if request.user.role == 'ADMIN':
-            # Admin sees entire tree, starting from root
-            base_member = MLMMember.objects.filter(sponsor__isnull=True).first()
-        elif request.user.role == 'MLM_MEMBER':
-            # MLM member sees their own downline
-            base_member = request.user.mlm_profile
-        else:
-            return Response({
-                'error': 'Unauthorized access'
-            }, status=status.HTTP_403_FORBIDDEN)
+#     def get(self, request):
+#         # Determine the base member for the tree view
+#         if request.user.role == 'ADMIN':
+#             # Admin sees entire tree, starting from root
+#             base_member = MLMMember.objects.filter(sponsor__isnull=True).first()
+#         elif request.user.role == 'MLM_MEMBER':
+#             # MLM member sees their own downline
+#             base_member = request.user.mlm_profile
+#         else:
+#             return Response({
+#                 'error': 'Unauthorized access'
+#             }, status=status.HTTP_403_FORBIDDEN)
 
-        # If no base member found, return empty tree
-        if not base_member:
-            return Response({
-                'message': 'No member tree available',
-                'tree': []
-            })
+#         # If no base member found, return empty tree
+#         if not base_member:
+#             return Response({
+#                 'message': 'No member tree available',
+#                 'tree': []
+#             })
 
-        # Recursive function to build member tree
-        def build_member_tree(member):
-            # Get direct referrals
-            referrals = MLMMember.objects.filter(sponsor=member)
+#         # Recursive function to build member tree
+#         def build_member_tree(member):
+#             # Get direct referrals
+#             referrals = MLMMember.objects.filter(sponsor=member)
             
-            member_data = {
-                'id': member.id,
-                'member_id': member.member_id,
-                'name': member.user.get_full_name() or member.user.username,
-                'email': member.user.email,
-                'phone_number': member.user.phone_number,
-                'position_name': member.position.name if member.position else None,
-                'is_active': member.is_active,
-                'total_earnings': float(member.total_earnings),
-                'total_bp': member.total_bp,
-                'referral_count': referrals.count(),
-                'children': [build_member_tree(referral) for referral in referrals]
-            }
+#             member_data = {
+#                 'id': member.id,
+#                 'member_id': member.member_id,
+#                 'name': member.user.get_full_name() or member.user.username,
+#                 'email': member.user.email,
+#                 'phone_number': member.user.phone_number,
+#                 'position_name': member.position.name if member.position else None,
+#                 'is_active': member.is_active,
+#                 'total_earnings': float(member.total_earnings),
+#                 'total_bp': member.total_bp,
+#                 'referral_count': referrals.count(),
+#                 'children': [build_member_tree(referral) for referral in referrals]
+#             }
             
-            return member_data
+#             return member_data
 
-        # Build and return the tree
-        tree = build_member_tree(base_member)
+#         # Build and return the tree
+#         tree = build_member_tree(base_member)
         
-        return Response({
-            'tree': tree
-        })
-
+#         return Response({
+#             'tree': tree
+#         })
+class MLMMemberTreeView(APIView):
+    """
+    API endpoint to get MLM member hierarchy tree or forest
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            # Check if a specific root member is requested
+            root_member_id = request.query_params.get('root')
+            
+            if root_member_id:
+                # Return tree for a specific root member
+                return self.get_specific_tree(root_member_id)
+            else:
+                # Return the entire forest (all root members)
+                return self.get_forest()
+                
+        except Exception as e:
+            logger.error(f"Error in MLM member tree: {str(e)}")
+            return Response(
+                {'error': 'Failed to fetch member tree', 'details': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get_specific_tree(self, root_member_id):
+        """Get tree for a specific root member"""
+        try:
+            # Get the requested root member
+            root_member = MLMMember.objects.filter(member_id=root_member_id).first()
+            
+            if not root_member:
+                return Response(
+                    {'error': f'Member with ID {root_member_id} not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Build and return the tree
+            tree = self.build_member_tree(root_member)
+            return Response({'tree': tree})
+            
+        except Exception as e:
+            logger.error(f"Error in get_specific_tree: {str(e)}")
+            return Response(
+                {'error': 'Failed to fetch member tree', 'details': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def get_forest(self):
+        """Get all root members and their trees"""
+        try:
+            # If user is MLM member, get their tree only
+            if self.request.user.role == 'MLM_MEMBER':
+                mlm_profile = MLMMember.objects.filter(user=self.request.user).first()
+                
+                if not mlm_profile:
+                    return Response(
+                        {'error': 'MLM profile not found for current user'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+                
+                tree = self.build_member_tree(mlm_profile)
+                return Response({'tree': tree})
+            
+            # For admins, get all root members (those without sponsors)
+            elif self.request.user.role == 'ADMIN':
+                root_members = MLMMember.objects.filter(sponsor__isnull=True)
+                
+                if not root_members.exists():
+                    return Response(
+                        {'error': 'No root members found'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+                
+                # If there's only one root member, return it as a single tree
+                if root_members.count() == 1:
+                    tree = self.build_member_tree(root_members.first())
+                    return Response({'tree': tree})
+                
+                # Otherwise, return all root members
+                forest = [self.build_member_tree(member) for member in root_members]
+                return Response({'forest': forest})
+            
+            else:
+                return Response(
+                    {'error': 'Unauthorized access'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in get_forest: {str(e)}")
+            return Response(
+                {'error': 'Failed to fetch member forest', 'details': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def build_member_tree(self, member):
+        """Build tree for a single member"""
+        if not member:
+            return None
+            
+        # Get member data
+        user = member.user
+        full_name = f"{user.first_name} {user.last_name}".strip() if user else "Unknown"
+        
+        # Get direct downline members
+        direct_members = MLMMember.objects.filter(sponsor=member)
+        
+        # Calculate member statistics
+        total_earnings = Commission.objects.filter(
+            member=member, is_paid=True
+        ).aggregate(Sum('amount'))['amount__sum'] or 0
+        
+        # Create node data
+        node = {
+            'id': member.id,
+            'member_id': member.member_id,
+            'name': full_name,
+            'email': user.email if user else None,
+            'phone_number': user.phone_number if user else None,
+            'is_active': member.is_active,
+            'position_name': member.position.name if member.position else None,
+            'referral_count': direct_members.count(),
+            'total_bp': member.total_bp or 0,
+            'total_earnings': float(total_earnings),
+        }
+        
+        # Add children recursively
+        if direct_members.exists():
+            node['children'] = [
+                self.build_member_tree(child) 
+                for child in direct_members
+            ]
+        else:
+            node['children'] = []
+            
+        return node
 class MLMMemberDetailsView(APIView):
     permission_classes = [IsAuthenticated]
 
