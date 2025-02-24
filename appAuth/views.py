@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest 
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -17,7 +17,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer 
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -44,6 +44,8 @@ from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from utils.email_utils import send_welcome_email
+import string
+from django.core.exceptions import ValidationError
 
 
 logger = logging.getLogger(__name__)
@@ -833,7 +835,44 @@ class MLMMemberViewSet(viewsets.ModelViewSet):
                 {'error': str(e)}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
+    @action(detail=True, methods=['POST'])
+    def update_profile(self, request, member_id=None):
+        try:
+            member = self.get_object()
+            user = member.user
+
+            # Update user fields
+            user.first_name = request.data.get('first_name', user.first_name)
+            user.last_name = request.data.get('last_name', user.last_name)
+            user.email = request.data.get('email', user.email)
+            user.phone_number = request.data.get('phone_number', user.phone_number)
+            user.save()
+
+            return Response({'status': 'success'})
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['POST'])
+    def reset_password(self, request, member_id=None):
+        try:
+            member = self.get_object()
+            new_password = request.data.get('new_password')
+
+            if not new_password:
+                raise ValidationError('New password is required')
+
+            member.user.set_password(new_password)
+            member.user.save()
+
+            return Response({'status': 'success'})
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class TestimonialViewSet(viewsets.ModelViewSet):
     queryset = Testimonial.objects.all()
@@ -1796,7 +1835,7 @@ class AddressViewSet(viewsets.ModelViewSet):
 class CustomerProfileView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
-
+    
     def post(self, request):
         """Update customer profile"""
         if request.user.role != 'CUSTOMER':
@@ -1833,7 +1872,82 @@ class CustomerProfileView(APIView):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
+class MLMProfileView(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        """
+        Retrieve current user's profile details
+        """
+        try:
+            user = request.user
+            
+            # Prepare user data
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'email': user.email,
+                'phone_number': user.phone_number,
+                'role': user.role,
+            }
+
+            # If it's an MLM member, add additional details
+            if user.role == 'MLM_MEMBER':
+                try:
+                    mlm_profile = user.mlm_profile
+                    user_data.update({
+                        'member_id': mlm_profile.member_id,
+                        'position': mlm_profile.position.name if mlm_profile.position else None,
+                        'total_bp': mlm_profile.total_bp,
+                    })
+                except Exception as mlm_error:
+                    logger.error(f"Error fetching MLM profile: {str(mlm_error)}")
+
+            return Response(user_data)
+        
+        except Exception as e:
+            logger.error(f"Error in profile details: {str(e)}")
+            return Response({
+                'error': 'Failed to retrieve profile details'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        """
+        Update user profile
+        """
+        try:
+            user = request.user
+            
+            # Validate input
+            serializer = MLMProfileSerializer(
+                user, 
+                data=request.data, 
+                partial=True
+            )
+            
+            if serializer.is_valid():
+                user = serializer.save()
+                
+                return Response({
+                    'status': 'success',
+                    'message': 'Profile updated successfully',
+                    'userinfo': serializer.data
+                })
+            
+            return Response({
+                'status': 'error',
+                'message': 'Invalid data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        except Exception as e:
+            logger.error(f"Error updating profile: {str(e)}")
+            return Response({
+                'error': 'Failed to update profile'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 #---------------------------------- payment / invoice -------------------------------------_#
 
 class OrderProcessView(APIView):
@@ -2810,14 +2924,94 @@ class MLMMemberTreeView(APIView):
 class MLMMemberDetailsView(APIView):
     permission_classes = [IsAuthenticated]
 
+    # def get(self, request, member_id):
+    #     try:
+    #         # Get the current logged-in user's MLM profile
+    #         current_member = request.user.mlm_profile
+
+    #         # Find the target member
+    #         try:
+    #             target_member = MLMMember.objects.get(member_id=member_id)
+    #         except MLMMember.DoesNotExist:
+    #             return Response({
+    #                 'error': 'Member not found'
+    #             }, status=status.HTTP_404_NOT_FOUND)
+
+    #         # Check if the target member is in the current member's network
+    #         def is_in_network(current, target):
+    #             """
+    #             Recursively check if target is in current's network
+    #             """
+    #             if current == target:
+    #                 return False  # Prevent self-view
+                
+    #             # Get direct downline members
+    #             direct_downline = MLMMember.objects.filter(sponsor=current)
+                
+    #             for referral in direct_downline:
+    #                 if referral == target or is_in_network(referral, target):
+    #                     return True
+                
+    #             return False
+
+    #         # Allow access for:
+    #         # 1. Admin users
+    #         # 2. The member themselves
+    #         # 3. Members within the same network
+    #         if (request.user.role == 'ADMIN' or 
+    #             current_member == target_member or 
+    #             is_in_network(current_member, target_member)):
+                
+    #             # Prepare detailed member information
+    #             member_details = {
+    #                 'personal_info': {
+    #                     'member_id': target_member.member_id,
+    #                     'name': target_member.user.get_full_name() or target_member.user.username,
+    #                     'email': target_member.user.email,
+    #                     'phone_number': target_member.user.phone_number,
+    #                     'date_joined': target_member.created_at,
+    #                     'is_active': target_member.is_active
+    #                 },
+    #                 'position_details': {
+    #                     'current_position': target_member.position.name if target_member.position else None,
+    #                     'discount_percentage': float(target_member.position.discount_percentage) if target_member.position else None
+    #                 },
+    #                 'financial_details': {
+    #                     'total_earnings': float(target_member.total_earnings),
+    #                     'total_bp': target_member.total_bp,
+    #                     'current_month_purchase': float(target_member.current_month_purchase)
+    #                 },
+    #                 'network_details': {
+    #                     'direct_referrals': MLMMember.objects.filter(sponsor=target_member).count(),
+    #                     'total_network_size': self.get_total_network_size(target_member)
+    #                 },
+    #                 'recent_commissions': self.get_recent_commissions(target_member)
+    #             }
+
+    #             return Response(member_details)
+            
+    #         else:
+    #             return Response({
+    #                 'error': 'You are not authorized to view this member\'s details'
+    #             }, status=status.HTTP_403_FORBIDDEN)
+        
+    #     except Exception as e:
+    #         logger.error(f"Error fetching member details: {str(e)}")
+    #         return Response({
+    #             'error': 'An error occurred while fetching member details'
+    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     def get(self, request, member_id):
         try:
             # Determine if the user has permission to view the member
             if request.user.role == 'ADMIN':
+                # Admins can view any member's details
                 member = get_object_or_404(MLMMember, member_id=member_id)
             elif request.user.role == 'MLM_MEMBER':
                 # MLM member can only view their direct and indirect downline
                 current_member = request.user.mlm_profile
+                
+                # Get the target member
+                member = get_object_or_404(MLMMember, member_id=member_id)
                 
                 # Check if the requested member is in the current member's downline
                 def is_in_downline(current, target):
@@ -2830,9 +3024,8 @@ class MLMMemberDetailsView(APIView):
                             return True
                     return False
 
-                member = get_object_or_404(MLMMember, member_id=member_id)
-                
-                if not is_in_downline(current_member, member):
+                # If not in downline and not the same member, deny access
+                if not is_in_downline(current_member, member) and current_member != member:
                     return Response({
                         'error': 'You are not authorized to view this member\'s details'
                     }, status=status.HTTP_403_FORBIDDEN)
@@ -2868,12 +3061,76 @@ class MLMMemberDetailsView(APIView):
             }
 
             return Response(member_details)
-
+        
         except Exception as e:
             logger.error(f"Error fetching member details: {e}")
             return Response({
                 'error': 'An error occurred while fetching member details'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # def get(self, request, member_id):
+    #     try:
+    #         # Determine if the user has permission to view the member
+    #         if request.user.role == 'ADMIN':
+    #             member = get_object_or_404(MLMMember, member_id=member_id)
+    #         elif request.user.role == 'MLM_MEMBER':
+    #             # MLM member can only view their direct and indirect downline
+    #             current_member = request.user.mlm_profile
+                
+    #             # Check if the requested member is in the current member's downline
+    #             def is_in_downline(current, target):
+    #                 if current == target:
+    #                     return False
+                    
+    #                 referrals = MLMMember.objects.filter(sponsor=current)
+    #                 for referral in referrals:
+    #                     if referral == target or is_in_downline(referral, target):
+    #                         return True
+    #                 return False
+
+    #             member = get_object_or_404(MLMMember, member_id=member_id)
+                
+    #             if not is_in_downline(current_member, member):
+    #                 return Response({
+    #                     'error': 'You are not authorized to view this member\'s details'
+    #                 }, status=status.HTTP_403_FORBIDDEN)
+    #         else:
+    #             return Response({
+    #                 'error': 'Unauthorized access'
+    #             }, status=status.HTTP_403_FORBIDDEN)
+
+    #         # Detailed member information
+    #         member_details = {
+    #             'personal_info': {
+    #                 'member_id': member.member_id,
+    #                 'name': member.user.get_full_name() or member.user.username,
+    #                 'email': member.user.email,
+    #                 'phone_number': member.user.phone_number,
+    #                 'date_joined': member.created_at,
+    #                 'is_active': member.is_active
+    #             },
+    #             'position_details': {
+    #                 'current_position': member.position.name if member.position else None,
+    #                 'discount_percentage': float(member.position.discount_percentage) if member.position else None
+    #             },
+    #             'financial_details': {
+    #                 'total_earnings': float(member.total_earnings),
+    #                 'total_bp': member.total_bp,
+    #                 'current_month_purchase': float(member.current_month_purchase)
+    #             },
+    #             'network_details': {
+    #                 'direct_referrals': MLMMember.objects.filter(sponsor=member).count(),
+    #                 'total_network_size': self.get_total_network_size(member)
+    #             },
+    #             'recent_commissions': self.get_recent_commissions(member)
+    #         }
+
+    #         return Response(member_details)
+
+    #     except Exception as e:
+    #         logger.error(f"Error fetching member details: {e}")
+    #         return Response({
+    #             'error': 'An error occurred while fetching member details'
+    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def get_total_network_size(self, member):
         # Recursive function to count total network size
@@ -3536,6 +3793,9 @@ class MLMDashboardView(APIView):
                 # Rank Details
                 'current_rank': member.position.name if member.position else 'N/A',
                 'rank_target': float(member.current_month_purchase) if member else 0,  # Replaced sales_target
+                
+                # Add total_bp to the dashboard data
+                'total_bp': member.total_bp,
 
                 # Performance Data
                 'monthly_performance': self.safe_get_monthly_performance(member),
@@ -3926,7 +4186,20 @@ class AdminDashboardView(APIView):
         try:
             from home.models import Product, WithdrawalRequest, KYCDocument, MLMMember
             alerts = []
+            
+            # Check for pending password reset requests
+            pending_resets = PasswordResetRequest.objects.filter(
+                status='PENDING'
+            ).select_related('user').count()
 
+            if pending_resets > 0:
+                alerts.append({
+                    'title': 'Pending Password Reset Requests',
+                    'description': f'{pending_resets} password reset requests awaiting approval',
+                    'severity': 'high',
+                    'type': 'password_reset'
+                })
+                
             # Low Stock Products Alert
             low_stock_products = Product.objects.filter(
                 stock__lt=F('low_stock_threshold')
@@ -4597,15 +4870,14 @@ class MLMLiveCommissionView(APIView):
     
     def get(self, request, member_id):
         try:
-            # Check authorization - admin can view any member's data, MLM member can only view their own
+            # Check authorization
             if request.user.role != 'ADMIN' and (not hasattr(request.user, 'mlm_profile') or request.user.mlm_profile.member_id != member_id):
                 return Response({
                     'error': 'You are not authorized to view this data'
                 }, status=status.HTTP_403_FORBIDDEN)
             
-            # Get the target member
             try:
-                member = MLMMember.objects.get(member_id=member_id)
+                member = MLMMember.objects.select_related('position', 'user').get(member_id=member_id)
             except MLMMember.DoesNotExist:
                 return Response({
                     'error': 'Member not found'
@@ -4614,151 +4886,133 @@ class MLMLiveCommissionView(APIView):
             # Check if member's position allows earning commissions
             if not member.position.can_earn_commission:
                 return Response({
-                    'error': 'This member\'s position does not qualify for commissions',
                     'current_month_estimate': "0.00",
                     'last_month_earned': "0.00",
                     'total_pending': "0.00",
                     'level_breakdown': []
-                }, status=status.HTTP_200_OK)
-            
+                })
+
             # Get current month and last month dates
             today = timezone.now()
             first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            
             last_month = (today.replace(day=1) - datetime.timedelta(days=1))
             first_day_last_month = last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            last_day_last_month = first_day_current_month - datetime.timedelta(seconds=1)
             
-            # Calculate the last month's earned commissions
+            # Calculate last month's earned commissions
             last_month_earned = Commission.objects.filter(
                 member=member,
                 is_paid=True,
                 date__gte=first_day_last_month,
-                date__lte=last_day_last_month
+                date__lte=first_day_current_month
             ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-            
+
             # Calculate total pending commissions
             total_pending = Commission.objects.filter(
                 member=member,
                 is_paid=False
             ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-            
-            # Get all orders from the current month
+
+            # Get downline members by level
+            level_breakdown = []
+            current_month_estimate = Decimal('0.00')
+            downline_by_level = self.get_downline_by_level(member)
+
+            # Get current month orders
             current_month_orders = Order.objects.filter(
                 order_date__gte=first_day_current_month,
                 status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
             )
-            
-            # Function to get downline members by level
-            def get_downline_by_level(root_member, max_level=10):
-                result = {}
-                
-                def traverse(current_member, level=1, parent_id=None):
-                    if level > max_level:
-                        return
+
+            # Calculate level breakdown
+            for level, members in downline_by_level.items():
+                member_ids = [m['user_id'] for m in members]
+                if member_ids:
+                    level_purchases = current_month_orders.filter(
+                        user_id__in=member_ids
+                    ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
                     
-                    # Get direct downline
-                    downline = MLMMember.objects.filter(sponsor=current_member)
-                    
-                    for member in downline:
-                        if level not in result:
-                            result[level] = []
-                            
-                        result[level].append({
-                            'id': member.id,
-                            'member_id': member.member_id,
-                            'user_id': member.user.id,
-                            'parent_id': parent_id
-                        })
-                        
-                        # Recursively traverse deeper levels
-                        traverse(member, level + 1, member.id)
-                
-                traverse(root_member, 1, root_member.id)
-                return result
-            
-            # Get member's downline organized by level
-            downline_by_level = get_downline_by_level(member)
-            
-            # Prepare level breakdown data
-            level_breakdown = []
-            current_month_estimate = Decimal('0.00')
-            
-            # Process each level
-            for level, members_data in downline_by_level.items():
-                # Get member IDs for this level
-                member_ids = [m['member_id'] for m in members_data]
-                user_ids = [m['user_id'] for m in members_data]
-                
-                # Skip if no members at this level
-                if not member_ids:
-                    continue
-                
-                # Get total purchases for this level
-                level_purchases = current_month_orders.filter(
-                    user_id__in=user_ids
-                ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
-                
-                # Get commission rate for this level
-                # This is a simplified example - implement your own commission logic
-                commission_rate = self.get_commission_rate(member.position, level)
-                
-                # Calculate estimated commission for this level
-                level_commission = (level_purchases * commission_rate) / 100
-                current_month_estimate += level_commission
-                
-                level_breakdown.append({
-                    'level': level,
-                    'member_count': len(member_ids),
-                    'total_purchases': str(level_purchases),
-                    'commission_rate': str(commission_rate),
-                    'estimated_commission': str(level_commission)
-                })
-            
-            # Get top performers from downline
-            top_performers = self.get_top_performers(member, downline_by_level, current_month_orders)
-            
-            # Get recent transactions
-            recent_transactions = self.get_recent_transactions(member, downline_by_level, current_month_orders)
-            
-            return Response({
+                    commission_rate = self.get_commission_rate(member.position, level)
+                    level_commission = (level_purchases * commission_rate) / 100
+                    current_month_estimate += level_commission
+
+                    level_breakdown.append({
+                        'level': level,
+                        'member_count': len(member_ids),
+                        'total_purchases': str(level_purchases),
+                        'commission_rate': str(commission_rate),
+                        'estimated_commission': str(level_commission)
+                    })
+
+            response_data = {
                 'current_month_estimate': str(current_month_estimate),
                 'last_month_earned': str(last_month_earned),
                 'total_pending': str(total_pending),
                 'level_breakdown': level_breakdown,
-                'top_performers': top_performers,
-                'recent_transactions': recent_transactions
-            })
-            
+                'top_performers': self.get_top_performers(member, downline_by_level, current_month_orders),
+                'recent_transactions': self.get_recent_transactions(member, downline_by_level, current_month_orders)
+            }
+
+            return Response(response_data)
+
         except Exception as e:
+            logger.error(f"Error in live commission calculation: {str(e)}", exc_info=True)
             return Response({
-                'error': str(e)
+                'error': 'An error occurred while calculating commissions'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+    def get_downline_by_level(self, root_member, max_level=10):
+        """Get all downline members organized by level"""
+        result = {}
+        
+        def traverse(current_member, level=1):
+            if level > max_level:
+                return
+                
+            # Get direct downline
+            downline = MLMMember.objects.filter(
+                sponsor=current_member,
+                is_active=True
+            ).select_related('user', 'position')
+            
+            if downline.exists():
+                if level not in result:
+                    result[level] = []
+                    
+                for member in downline:
+                    result[level].append({
+                        'id': member.id,
+                        'member_id': member.member_id,
+                        'user_id': member.user.id,
+                        'position': member.position
+                    })
+                    
+                    # Recursively get next level
+                    traverse(member, level + 1)
+        
+        traverse(root_member)
+        return result
+
     def get_commission_rate(self, position, level):
         """
-        Determine commission rate based on position and level
-        This is just an example - implement your specific commission structure
+        Calculate commission rate based on position and level
+        Returns decimal percentage (e.g., 5.0 for 5%)
         """
-        # Base commission rate from position
         base_rate = position.commission_percentage
         
-        # Apply level-based reduction
-        # Example: Level 1 = 100% of base rate, Level 2 = 50%, Level 3 = 25%, etc.
+        # Level-based reduction factors
         level_multipliers = {
-            1: 1.0,  # 100% of base rate
-            2: 0.5,  # 50% of base rate
-            3: 0.25, # 25% of base rate
-            4: 0.125, # 12.5% of base rate
-            5: 0.0625 # 6.25% of base rate
+            1: Decimal('1.0'),    # 100% of base rate
+            2: Decimal('0.5'),    # 50% of base rate
+            3: Decimal('0.25'),   # 25% of base rate
+            4: Decimal('0.125'),  # 12.5% of base rate
+            5: Decimal('0.0625')  # 6.25% of base rate
         }
         
-        multiplier = level_multipliers.get(level, 0.03125)  # Default to 3.125% for higher levels
-        
+        multiplier = level_multipliers.get(level, Decimal('0.03125'))  # Default to 3.125% for higher levels
         return base_rate * multiplier
-    
+
     def get_top_performers(self, member, downline_by_level, current_month_orders):
-        """Get top performing downline members by purchase volume"""
+        """Get top performing downline members"""
         try:
             # Flatten downline data
             all_downline = []
@@ -4773,28 +5027,20 @@ class MLMLiveCommissionView(APIView):
             if not user_ids:
                 return []
             
-            # Get orders and aggregate by user
+            # Calculate purchases for each downline member
             user_purchases = current_month_orders.filter(
                 user_id__in=user_ids
             ).values('user_id').annotate(
                 total_purchases=Sum('final_amount')
             ).order_by('-total_purchases')[:5]  # Top 5 performers
             
-            # Match with downline data and add member details
             top_performers = []
             for purchase in user_purchases:
                 user_id = purchase['user_id']
-                
-                # Find member data
                 member_data = next((m for m in all_downline if m['user_id'] == user_id), None)
-                if not member_data:
-                    continue
                 
-                # Get MLM member details
-                try:
+                if member_data:
                     mlm_member = MLMMember.objects.select_related('user', 'position').get(user_id=user_id)
-                    
-                    # Calculate commission for this member
                     commission_rate = self.get_commission_rate(member.position, member_data['level'])
                     commission_amount = (purchase['total_purchases'] * commission_rate) / 100
                     
@@ -4806,14 +5052,13 @@ class MLMLiveCommissionView(APIView):
                         'total_purchases': str(purchase['total_purchases']),
                         'your_commission': str(commission_amount)
                     })
-                except MLMMember.DoesNotExist:
-                    continue
             
             return top_performers
             
         except Exception as e:
+            logger.error(f"Error getting top performers: {str(e)}")
             return []
-    
+
     def get_recent_transactions(self, member, downline_by_level, current_month_orders):
         """Get recent transactions from downline members"""
         try:
@@ -4833,38 +5078,28 @@ class MLMLiveCommissionView(APIView):
             # Get recent orders
             recent_orders = current_month_orders.filter(
                 user_id__in=user_ids
-            ).order_by('-order_date')[:10]  # Latest 10 orders
+            ).select_related('user').order_by('-order_date')[:10]
             
-            recent_transactions = []
+            transactions = []
             for order in recent_orders:
-                # Find member data for this order
-                member_data = next((m for m in all_downline if m['user_id'] == order.user_id), None)
-                if not member_data:
-                    continue
-                
-                # Get MLM member details
-                try:
-                    mlm_member = MLMMember.objects.select_related('user').get(user_id=order.user_id)
-                    
-                    # Calculate commission for this order
+                member_data = next((m for m in all_downline if m['user_id'] == order.user.id), None)
+                if member_data:
                     commission_rate = self.get_commission_rate(member.position, member_data['level'])
                     commission_amount = (order.final_amount * commission_rate) / 100
                     
-                    recent_transactions.append({
+                    transactions.append({
                         'date': order.order_date,
-                        'member_name': f"{mlm_member.user.first_name} {mlm_member.user.last_name}",
+                        'member_name': f"{order.user.first_name} {order.user.last_name}",
                         'level': member_data['level'],
                         'order_id': order.order_number,
                         'amount': str(order.final_amount),
                         'your_commission': str(commission_amount)
                     })
-                    
-                except MLMMember.DoesNotExist:
-                    continue
             
-            return recent_transactions
+            return transactions
             
         except Exception as e:
+            logger.error(f"Error getting recent transactions: {str(e)}")
             return []
 
 
@@ -5279,3 +5514,342 @@ class OrderCancellationView(APIView):
                 {'error': 'An error occurred while cancelling the order'}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+
+
+
+class RequestPasswordResetView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        try:
+            username = request.data.get('username')
+            if not username:
+                return Response({
+                    'status': False,
+                    'message': 'Username is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                user = User.objects.get(username=username)
+            except User.DoesNotExist:
+                return Response({
+                    'status': False,
+                    'message': 'User not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Check if user is MLM member or admin
+            if user.role not in ['MLM_MEMBER', 'ADMIN']:
+                return Response({
+                    'status': False,
+                    'message': 'Password reset not available for customers'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check for existing pending requests
+            existing_request = PasswordResetRequest.objects.filter(
+                user=user,
+                status='PENDING'
+            ).exists()
+
+            if existing_request:
+                return Response({
+                    'status': False,
+                    'message': 'A password reset request is already pending'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Create password reset request without specifying processed_by
+            reset_request = PasswordResetRequest.objects.create(
+                user=user,
+                # Note: processed_by will remain NULL until an admin processes it
+            )
+
+            # Send notification to admins
+            try:
+                admin_emails = User.objects.filter(
+                    role='ADMIN',
+                    email__isnull=False
+                ).values_list('email', flat=True)
+
+                if admin_emails:
+                    # Send email notification to admins
+                    send_mail(
+                        subject='New Password Reset Request',
+                        message=f'A password reset request has been submitted for user: {username}',
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        recipient_list=list(admin_emails),
+                        fail_silently=True
+                    )
+
+                # Create a system notification
+                Notification.objects.create(
+                    title='New Password Reset Request',
+                    message=f'Password reset requested by user: {username}',
+                    notification_type='SYSTEM'
+                )
+
+            except Exception as e:
+                logger.error(f"Error sending notifications: {str(e)}")
+
+            return Response({
+                'status': True,
+                'message': 'Password reset request submitted successfully'
+            })
+
+        except Exception as e:
+            logger.error(f"Password reset request error: {str(e)}")
+            return Response({
+                'status': False,
+                'message': 'An error occurred processing your request'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ProcessPasswordResetView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, request_id):
+        # Add extensive logging
+        logger.info(f"Password reset process initiated")
+        logger.info(f"Request ID: {request_id}")
+        logger.info(f"User: {request.user.username}")
+        logger.info(f"User Role: {request.user.role}")
+        logger.info(f"Request Data: {request.data}")
+
+        try:
+            # Validate admin access
+            if request.user.role != 'ADMIN':
+                logger.warning(f"Unauthorized access attempt by {request.user.username}")
+                return Response({
+                    'error': 'Only admin can process reset requests'
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Retrieve the reset request
+            try:
+                reset_request = PasswordResetRequest.objects.get(id=request_id)
+            except PasswordResetRequest.DoesNotExist:
+                logger.error(f"Password reset request {request_id} not found")
+                return Response({
+                    'error': 'Reset request not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Validate action
+            action = request.data.get('action')
+            if action not in ['approve', 'reject']:
+                logger.error(f"Invalid action: {action}")
+                return Response({
+                    'error': 'Invalid action. Must be "approve" or "reject"'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check request status
+            if reset_request.status != 'PENDING':
+                logger.warning(f"Attempt to process non-pending request. Current status: {reset_request.status}")
+                return Response({
+                    'error': f'Cannot process request with status {reset_request.status}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Process the request
+            if action == 'approve':
+                # Generate new password
+                new_password = ''.join(random.choices(
+                    string.ascii_letters + string.digits, k=12
+                ))
+                
+                # Update user password
+                user = reset_request.user
+                user.set_password(new_password)
+                user.save()
+
+                # Log the password reset
+                logger.info(f"Password reset approved for user: {user.username}")
+
+                # Update request status
+                reset_request.status = 'APPROVED'
+                reset_request.processed_at = timezone.now()
+                reset_request.processed_by = request.user
+                reset_request.save()
+
+                return Response({
+                    'message': 'Password reset request approved successfully'
+                })
+            else:  # reject
+                reset_request.status = 'REJECTED'
+                reset_request.processed_at = timezone.now()
+                reset_request.processed_by = request.user
+                reset_request.save()
+
+                logger.info(f"Password reset request rejected for user: {reset_request.user.username}")
+
+                return Response({
+                    'message': 'Password reset request rejected successfully'
+                })
+
+        except Exception as e:
+            # Comprehensive error logging
+            logger.error(f"Unexpected error in password reset process: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'An unexpected error occurred',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class PasswordResetRequestListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            # Only admin and MLM members can view reset requests
+            if request.user.role not in ['ADMIN', 'MLM_MEMBER']:
+                return Response({
+                    'error': 'Unauthorized access'
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Query the reset requests
+            queryset = PasswordResetRequest.objects.all()
+
+            # Filter based on user role
+            if request.user.role == 'MLM_MEMBER':
+                # MLM members can only see their own requests
+                queryset = queryset.filter(user=request.user)
+
+            # Apply filters from query parameters
+            status_filter = request.query_params.get('status')
+            if status_filter:
+                queryset = queryset.filter(status=status_filter.upper())
+
+            # Order by most recent first
+            queryset = queryset.select_related('user', 'processed_by').order_by('-requested_at')
+
+            # Prepare the response data
+            requests_data = []
+            for reset_request in queryset:
+                request_data = {
+                    'id': reset_request.id,
+                    'username': reset_request.user.username,
+                    'email': reset_request.user.email,
+                    'requested_at': reset_request.requested_at,
+                    'status': reset_request.status,
+                    'processed_at': reset_request.processed_at,
+                }
+
+                if reset_request.processed_by:
+                    request_data['processed_by'] = {
+                        'id': reset_request.processed_by.id,
+                        'username': reset_request.processed_by.username,
+                        'role': reset_request.processed_by.role
+                    }
+
+                requests_data.append(request_data)
+
+            return Response(requests_data)
+
+        except Exception as e:
+            logger.error(f"Error fetching password reset requests: {str(e)}")
+            return Response({
+                'error': 'Failed to fetch password reset requests'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request, request_id=None):
+        try:
+            if request.user.role != 'ADMIN':
+                return Response({
+                    'error': 'Only admin can process reset requests'
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            reset_request = get_object_or_404(PasswordResetRequest, id=request_id)
+            action = request.data.get('action')
+
+            if action not in ['approve', 'reject']:
+                return Response({
+                    'error': 'Invalid action. Must be either "approve" or "reject"'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if reset_request.status != 'PENDING':
+                return Response({
+                    'error': 'Can only process pending requests'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if action == 'approve':
+                # Generate new password
+                new_password = ''.join(random.choices(
+                    string.ascii_letters + string.digits, k=12
+                ))
+
+                # Update user password
+                user = reset_request.user
+                user.set_password(new_password)
+                user.save()
+
+                # Send email to user
+                try:
+                    context = {
+                        'username': user.username,
+                        'new_password': new_password,
+                        'login_url': f"{settings.FRONTEND_URL}/login"
+                    }
+                    
+                    send_mail(
+                        subject='Your Password Has Been Reset',
+                        message=f'Your new password is: {new_password}',
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        recipient_list=[user.email],
+                        html_message=render_to_string('emails/password_reset_user.html', context),
+                        fail_silently=True
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending password reset email: {str(e)}")
+
+                reset_request.status = 'APPROVED'
+                
+            else:  # reject
+                reset_request.status = 'REJECTED'
+
+            reset_request.processed_at = timezone.now()
+            reset_request.processed_by = request.user
+            reset_request.save()
+
+            # Create notification
+            Notification.objects.create(
+                title='Password Reset Request Processed',
+                message=f'Your password reset request has been {action}d',
+                notification_type='SYSTEM',
+                recipient=reset_request.user.mlm_profile if hasattr(reset_request.user, 'mlm_profile') else None
+            )
+
+            return Response({
+                'message': f'Password reset request {action}d successfully'
+            })
+
+        except PasswordResetRequest.DoesNotExist:
+            return Response({
+                'error': 'Reset request not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except ValidationError as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error processing password reset request: {str(e)}")
+            return Response({
+                'error': 'Failed to process password reset request'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get_queryset(self):
+        """Helper method to get filtered queryset"""
+        queryset = PasswordResetRequest.objects.all().select_related(
+            'user',
+            'processed_by'
+        )
+
+        # Filter by status if provided
+        status = self.request.query_params.get('status')
+        if status:
+            queryset = queryset.filter(status=status.upper())
+
+        # Filter by date range if provided
+        start_date = self.request.query_params.get('start_date')
+        end_date = self.request.query_params.get('end_date')
+        if start_date:
+            queryset = queryset.filter(requested_at__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(requested_at__date__lte=end_date)
+
+        return queryset.order_by('-requested_at')

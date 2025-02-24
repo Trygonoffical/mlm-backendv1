@@ -121,14 +121,14 @@ CONTACT_EMAIL = 'support@herbalpower.com'  # Change to your support email
 
 # Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'  # e.g., smtp.gmail.com
-EMAIL_PORT = 587  # or 465 for SSL
+EMAIL_HOST = 'smtp.hostinger.com'  # e.g., smtp.gmail.com
+EMAIL_PORT = 465  # or 465 for SSL
 EMAIL_USE_TLS = True  # or False if using SSL
-EMAIL_HOST_USER = 'trygontechnologies@gmail.com'
+EMAIL_HOST_USER = 'info@trygon.in'
 EMAIL_HOST_PASSWORD = 'Trygon@123!'  # Consider using environment variables for security
 DEFAULT_FROM_EMAIL = 'Your MLM Platform <noreply@yourmlmwebsite.com>'
 
-
+FRONTEND_URL = 'http://localhost:3002'
 # Password validation
 #test
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators

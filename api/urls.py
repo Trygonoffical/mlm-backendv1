@@ -3,7 +3,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path , include
 from rest_framework.routers import DefaultRouter
-from appAuth.views import GenerateOTP , VerifyOTP , UserLogin , RefreshToken , ValidateTokenView , CustomTokenRefreshView , HomeSliderViewSet , CategoryViewSet , ProductViewSet , PositionViewSet , MLMMemberViewSet , TestimonialViewSet , AdvertisementViewSet , SuccessStoryViewSet , CustomerPickViewSet , CompanyInfoViewSet , AboutViewSet , HomeSectionViewSet , MenuViewSet , CustomPageViewSet , KYCDocumentViewSet , BlogViewSet , CreateOrderView, VerifyPaymentView , AddressViewSet , CustomerProfileView , OrderProcessView , PaymentWebhookView , download_invoice , OrderViewSet , WalletViewSet, WalletTransactionViewSet, WithdrawalRequestViewSet , NotificationViewSet , AdminOrderListView , UpdateOrderStatusView , MLMOrderListView , MLMMemberTreeView , MLMMemberDetailsView , MLMReportView , MLMDashboardView , AdminDashboardView , MLMMemberRegistrationView , DownlineListView , ContactViewSet , NewsletterViewSet , MLMLiveCommissionView , AdminCustomerViewSet , OrderTrackingView , CheckUsernameView , UpdateStockView , CheckStockAvailabilityView , OrderCancellationView
+from appAuth.views import GenerateOTP , VerifyOTP , UserLogin , RefreshToken , ValidateTokenView , CustomTokenRefreshView , HomeSliderViewSet , CategoryViewSet , ProductViewSet , PositionViewSet , MLMMemberViewSet , TestimonialViewSet , AdvertisementViewSet , SuccessStoryViewSet , CustomerPickViewSet , CompanyInfoViewSet , AboutViewSet , HomeSectionViewSet , MenuViewSet , CustomPageViewSet , KYCDocumentViewSet , BlogViewSet , CreateOrderView, VerifyPaymentView , AddressViewSet , CustomerProfileView , OrderProcessView , PaymentWebhookView , download_invoice , OrderViewSet , WalletViewSet, WalletTransactionViewSet, WithdrawalRequestViewSet , NotificationViewSet , AdminOrderListView , UpdateOrderStatusView , MLMOrderListView , MLMMemberTreeView , MLMMemberDetailsView , MLMReportView , MLMDashboardView , AdminDashboardView , MLMMemberRegistrationView , DownlineListView , ContactViewSet , NewsletterViewSet , MLMLiveCommissionView , AdminCustomerViewSet , OrderTrackingView , CheckUsernameView , UpdateStockView , CheckStockAvailabilityView , OrderCancellationView , RequestPasswordResetView , ProcessPasswordResetView , PasswordResetRequestListView , MLMProfileView
 
 
 router = DefaultRouter()
@@ -60,6 +60,10 @@ urlpatterns = [
     path('profile/details/', CustomerProfileView.as_view(), name='customer-profile-details'),
     path('profile/update/', CustomerProfileView.as_view(), name='customer-profile-update'),
 
+    # MLM Memver Profile update
+    path('MLMprofile/details/', MLMProfileView.as_view(), name='Member-profile-details'),
+    path('MLMprofile/update/', MLMProfileView.as_view(), name='member-profile-update'),
+
 
     path('orders/create/', OrderProcessView.as_view(), name='create-order'),
     path('orders/<int:order_id>/invoice/', download_invoice, name='download-invoice'),
@@ -76,6 +80,14 @@ urlpatterns = [
      MLMMemberViewSet.as_view({'post': 'verify_bank_details'}), 
      name='verify-bank-details'),
 
+
+     path('mlm-members/<str:member_id>/update-profile/', 
+         MLMMemberViewSet.as_view({'post': 'update_profile'}), 
+         name='mlm-member-update-profile'),
+    
+    path('mlm-members/<str:member_id>/reset-password/', 
+         MLMMemberViewSet.as_view({'post': 'reset_password'}), 
+         name='mlm-member-reset-password'),
 
     path('admin/orders/', AdminOrderListView.as_view(), name='admin-order-list'),
     path('admin/orders/<int:order_id>/status/', UpdateOrderStatusView.as_view(), name='update-order-status'),
@@ -112,6 +124,15 @@ urlpatterns = [
     path('check-stock/', CheckStockAvailabilityView.as_view(), name='check-stock'),
     path('orders/<int:order_id>/cancel/', OrderCancellationView.as_view(), name='cancel-order'),
 
+    path('request-password-reset/', 
+         RequestPasswordResetView.as_view(), 
+         name='request-password-reset'),
+    path('process-password-reset/<int:request_id>/',
+         ProcessPasswordResetView.as_view(),
+         name='process-password-reset'),
+    path('password-reset-requests/', 
+         PasswordResetRequestListView.as_view(), 
+         name='password-reset-requests'),
     # path('kyc-documents/bank-details/', 
     #  KYCDocumentViewSet.as_view({'get': 'bank_details', 'post': 'bank_details', 'put': 'bank_details'}), 
     #  name='kyc-bank-details'),

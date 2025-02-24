@@ -562,6 +562,11 @@ class MLMMemberSerializer(serializers.ModelSerializer):
     position_name = serializers.CharField(source='position.name', read_only=True)
     sponsor_name = serializers.CharField(source='sponsor.user.get_full_name', read_only=True)
 
+    monthly_earnings = serializers.SerializerMethodField()
+    recent_commissions = serializers.SerializerMethodField()
+    withdrawals = serializers.SerializerMethodField()
+    pending_payouts = serializers.SerializerMethodField()
+
     class Meta:
         model = MLMMember
         fields = [
@@ -571,7 +576,10 @@ class MLMMemberSerializer(serializers.ModelSerializer):
             'position_id', 'sponsor_id',
             # Read-only fields
             'user_email', 'user_phone', 'user_first_name', 'user_last_name',
-            'position_name', 'sponsor_name', 'is_active'
+            'position_name', 'sponsor_name', 'is_active' , 'monthly_earnings',
+            'recent_commissions',
+            'withdrawals',
+            'pending_payouts'
         ]
         read_only_fields = ['member_id', 'user_email', 'user_phone', 
                            'user_first_name', 'user_last_name',
@@ -668,7 +676,64 @@ class MLMMemberSerializer(serializers.ModelSerializer):
         # Ensure member_id is included in response
         data['member_id'] = instance.member_id
         return data
+    def get_monthly_earnings(self, obj):
+        earnings = Commission.objects.filter(
+            member=obj
+        ).annotate(
+            month=TruncMonth('date')
+        ).values('month').annotate(
+            amount=Sum('amount')
+        ).order_by('month')
+
+        return [
+            {
+                'month': entry['month'].strftime('%b %Y'),
+                'amount': float(entry['amount'])
+            }
+            for entry in earnings
+        ]
+
+    def get_recent_commissions(self, obj):
+        commissions = Commission.objects.filter(
+            member=obj
+        ).order_by('-date')[:10]
+
+        return [
+            {
+                'date': commission.date,
+                'amount': float(commission.amount),
+                'from_member_name': commission.from_member.user.get_full_name(),
+                'is_paid': commission.is_paid
+            }
+            for commission in commissions
+        ]
+
+    def get_withdrawals(self, obj):
+        withdrawals = WalletTransaction.objects.filter(
+            wallet__user=obj.user,
+            transaction_type='WITHDRAWAL'
+        ).order_by('-created_at')[:10]
+
+        return [
+            {
+                'date': withdrawal.created_at,
+                'amount': float(withdrawal.amount),
+                'status': withdrawal.status
+            }
+            for withdrawal in withdrawals
+        ]
+
+    def get_pending_payouts(self, obj):
+        return float(
+            Commission.objects.filter(
+                member=obj,
+                is_paid=False
+            ).aggregate(
+                total=Sum('amount')
+            )['total'] or 0
+        )
     
+
 class MLMMemberBasicSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     position_name = serializers.CharField(source='position.name', read_only=True)
@@ -1352,7 +1417,25 @@ class CustomerProfileSerializer(serializers.ModelSerializer):
         instance.save()
         return instance
     
+class MLMProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['first_name', 'last_name', 'email' ,'phone_number']
+        
+    def validate_email(self, value):
+        # Check if email is already in use by another user
+        if User.objects.exclude(pk=self.instance.pk).filter(email=value).exists():
+            raise serializers.ValidationError("This email is already in use.")
+        return value
 
+    def update(self, instance, validated_data):
+        # Update only allowed fields
+        instance.first_name = validated_data.get('first_name', instance.first_name)
+        instance.last_name = validated_data.get('last_name', instance.last_name)
+        instance.email = validated_data.get('email', instance.email)
+        instance.phone_number = validated_data.get('phone_number', instance.phone_number)
+        instance.save()
+        return instance
 
 class OrderItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer()
