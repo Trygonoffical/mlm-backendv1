@@ -129,6 +129,9 @@ EMAIL_HOST_PASSWORD = 'Trygon@123!'  # Consider using environment variables for 
 DEFAULT_FROM_EMAIL = 'Your MLM Platform <noreply@yourmlmwebsite.com>'
 
 FRONTEND_URL = 'http://localhost:3002'
+
+# Django settings.py
+MSG91_AUTH_KEY = '440798AeOvHXDvG2p67a9fb37P1'
 # Password validation
 #test
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators

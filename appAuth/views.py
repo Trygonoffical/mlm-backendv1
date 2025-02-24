@@ -44,6 +44,7 @@ from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from utils.email_utils import send_welcome_email
+from utils.msg91_utils import MSG91Service 
 import string
 from django.core.exceptions import ValidationError
 
@@ -104,75 +105,172 @@ class GenerateOTP(APIView):
         if not (10 <= len(phone_number) <= 12):
             return False, "Phone number should be 10-12 digits long"
         return True, "Valid phone number"
-
+    
+    
     def post(self, request):
-        phone_number = request.data.get('phone_number')
-
-        # Validate phone number
-        is_valid, message = self.validate_phone_number(phone_number)
-        if not is_valid:
-            return Response({
-                'status': False,
-                'message': message
-            }, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            # Check if user exists and is not a customer
-            user = User.objects.filter(phone_number=phone_number).first()
-            if user and user.role != 'CUSTOMER':
+            phone_number = request.data.get('phone_number')
+
+            # Validate phone number
+            is_valid, message = self.validate_phone_number(phone_number)
+            if not is_valid:
                 return Response({
                     'status': False,
-                    'message': 'This number is registered as a non-customer user'
+                    'message': message
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Generate 6 digit OTP
-            otp = str(random.randint(100000, 999999))
-
-            # Save or update OTP
-            phone_otp, created = PhoneOTP.objects.get_or_create(
-                phone_number=phone_number,
-                defaults={'otp': otp}
-            )
-
-            if not created:
-                # Check if blocked period has expired
-                phone_otp.reset_if_expired()
-                
-                # Check if still blocked
-                if phone_otp.is_blocked():
-                    minutes_left = 30 - ((timezone.now() - phone_otp.last_attempt).seconds // 60)
+            try:
+                # Check if user exists and is not a customer
+                user = User.objects.filter(phone_number=phone_number).first()
+                if user and user.role != 'CUSTOMER':
                     return Response({
                         'status': False,
-                        'message': f'Maximum OTP attempts reached. Please try again after {minutes_left} minutes.'
+                        'message': 'This number is registered as a non-customer user'
                     }, status=status.HTTP_400_BAD_REQUEST)
 
-                phone_otp.otp = otp
-                phone_otp.is_verified = False
-                phone_otp.count += 1
-                phone_otp.save()
+                # Initialize MSG91 service
+                msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
 
-            # Send OTP via SMS
-            success, message = send_otp_sms(phone_number, otp)
+                # Generate 6 digit OTP
+                otp = str(random.randint(100000, 999999))
 
-            if success:
+                # Send OTP via MSG91
+                send_result = msg91_service.send_otp(phone_number, otp)
+
+                # Check if OTP sending was successful
+                if not send_result['success']:
+                    return Response({
+                        'status': False,
+                        'message': f'Failed to send OTP: {send_result["message"]}'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                # Save or update OTP
+                phone_otp, created = PhoneOTP.objects.get_or_create(
+                    phone_number=phone_number,
+                    defaults={'otp': otp}
+                )
+
+                if not created:
+                    # Check if blocked period has expired
+                    phone_otp.reset_if_expired()
+                    
+                    # Check if still blocked
+                    if phone_otp.is_blocked():
+                        minutes_left = 30 - ((timezone.now() - phone_otp.last_attempt).seconds // 60)
+                        return Response({
+                            'status': False,
+                            'message': f'Maximum OTP attempts reached. Please try again after {minutes_left} minutes.'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                    phone_otp.otp = otp
+                    phone_otp.is_verified = False
+                    phone_otp.count += 1
+                    phone_otp.save()
+
                 return Response({
                     'status': True,
                     'message': 'OTP sent successfully',
                     'attempts_left': 5 - phone_otp.count,
                     'otp': otp  # Remove in production
                 })
-            else:
+
+            except Exception as e:
+                logger.error(f"Error in GenerateOTP: {str(e)}")
                 return Response({
                     'status': False,
-                    'message': f'Failed to send OTP: {message}'
+                    'message': 'Internal server error'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         except Exception as e:
-            logger.error(f"Error in GenerateOTP: {str(e)}")
+            logger.error(f"Unexpected error in GenerateOTP: {str(e)}")
             return Response({
                 'status': False,
-                'message': 'Internal server error'
+                'message': 'Unexpected error occurred'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # def post(self, request):
+    #     phone_number = request.data.get('phone_number')
+
+    #     # Validate phone number
+    #     is_valid, message = self.validate_phone_number(phone_number)
+    #     if not is_valid:
+    #         return Response({
+    #             'status': False,
+    #             'message': message
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+
+    #     try:
+    #         # Check if user exists and is not a customer
+    #         user = User.objects.filter(phone_number=phone_number).first()
+    #         if user and user.role != 'CUSTOMER':
+    #             return Response({
+    #                 'status': False,
+    #                 'message': 'This number is registered as a non-customer user'
+    #             }, status=status.HTTP_400_BAD_REQUEST)
+
+    #         # Generate 6 digit OTP
+    #         otp = str(random.randint(100000, 999999))
+
+    #         # Save or update OTP
+    #         phone_otp, created = PhoneOTP.objects.get_or_create(
+    #             phone_number=phone_number,
+    #             defaults={'otp': otp}
+    #         )
+
+    #         if not created:
+    #             # Check if blocked period has expired
+    #             phone_otp.reset_if_expired()
+                
+    #             # Check if still blocked
+    #             if phone_otp.is_blocked():
+    #                 minutes_left = 30 - ((timezone.now() - phone_otp.last_attempt).seconds // 60)
+    #                 return Response({
+    #                     'status': False,
+    #                     'message': f'Maximum OTP attempts reached. Please try again after {minutes_left} minutes.'
+    #                 }, status=status.HTTP_400_BAD_REQUEST)
+
+    #             phone_otp.otp = otp
+    #             phone_otp.is_verified = False
+    #             phone_otp.count += 1
+    #             phone_otp.save()
+
+    #         # Initialize MSG91 service
+    #         msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+
+    #         # Send OTP via MSG91
+    #         send_result = msg91_service.send_otp(phone_number, otp)
+    #         # Send OTP via SMS
+    #         # success, message = send_otp_sms(phone_number, otp)
+
+    #         if not send_result['success']:
+    #             return Response({
+    #                 'status': False,
+    #                 'message': f'Failed to send OTP: {send_result["message"]}'
+    #             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    #         # Save or update OTP
+    #         # phone_otp, created = PhoneOTP.objects.get_or_create(
+    #         #     phone_number=phone_number,
+    #         #     defaults={'otp': otp}
+    #         # )
+    #         # if success:
+    #         #     return Response({
+    #         #         'status': True,
+    #         #         'message': 'OTP sent successfully',
+    #         #         'attempts_left': 5 - phone_otp.count,
+    #         #         'otp': otp  # Remove in production
+    #         #     })
+    #         # else:
+    #         #     return Response({
+    #         #         'status': False,
+    #         #         'message': f'Failed to send OTP: {message}'
+    #         #     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    #     except Exception as e:
+    #         logger.error(f"Error in GenerateOTP: {str(e)}")
+    #         return Response({
+    #             'status': False,
+    #             'message': 'Internal server error'
+    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class VerifyOTP(APIView):
@@ -1705,7 +1803,46 @@ class CreateOrderView(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-
+# def send_order_confirmation_sms(order):
+#     msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+#     message = f"Dear User, your order {order.order_number} has been confirmed. Delivery by {order.expected_delivery_date}. For details, visit https://www.yourwebsite.com/OrderTracking"
+    
+#     result = msg91_service.send_transactional_sms(
+#         order.user.phone_number, 
+#         message
+#     )
+    
+#     if not result['success']:
+#         logger.error(f"Failed to send order confirmation SMS: {result['message']}")
+def send_order_confirmation_sms(order):
+    try:
+        msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+        
+        # Use a default delivery date if not specified
+        expected_delivery = getattr(order, 'expected_delivery_date', 'soon')
+        
+        # Ensure user and phone number exist
+        if not hasattr(order, 'user') or not order.user:
+            logger.error(f"No user associated with order {order.order_number}")
+            return
+        
+        phone_number = order.user.phone_number
+        if not phone_number:
+            logger.error(f"No phone number for user in order {order.order_number}")
+            return
+        
+        message = f"Dear User, your order {order.order_number} has been confirmed. Delivery by {expected_delivery}. For details, visit https://www.yourwebsite.com/OrderTracking"
+        
+        result = msg91_service.send_transactional_sms(
+            phone_number, 
+            message
+        )
+        
+        if not result['success']:
+            logger.error(f"Failed to send order confirmation SMS for order {order.order_number}: {result['message']}")
+    
+    except Exception as e:
+        logger.error(f"Unexpected error sending order confirmation SMS: {str(e)}")
 class VerifyPaymentView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -1754,6 +1891,9 @@ class VerifyPaymentView(APIView):
                 order.payment_id = payment_id
                 order.save()
 
+                # Send order confirmation SMS
+                send_order_confirmation_sms(order)
+
                 # If user is MLM member, update BP points
                 if request.user.role == 'MLM_MEMBER':
                     mlm_member = request.user.mlm_profile
@@ -1793,7 +1933,17 @@ class VerifyPaymentView(APIView):
                 'status': 'error',
                 'message': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
+    # def send_order_confirmation_sms(order):
+    #     msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+    #     message = f"Dear User, your order {order.order_number} has been confirmed. Delivery by {order.expected_delivery_date}. For details, visit https://www.yourwebsite.com/OrderTracking"
         
+    #     result = msg91_service.send_transactional_sms(
+    #         order.user.phone_number, 
+    #         message
+    #     )
+        
+    #     if not result['success']:
+    #         logger.error(f"Failed to send order confirmation SMS: {result['message']}")    
 
 class AddressViewSet(viewsets.ModelViewSet):
     serializer_class = AddressSerializer
