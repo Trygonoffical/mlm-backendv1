@@ -1899,10 +1899,12 @@ class VerifyPaymentView(APIView):
                     mlm_member = request.user.mlm_profile
                     mlm_member.total_bp += order.total_bp
                     mlm_member.current_month_purchase += order.final_amount
+                    # Check for position upgrade
+                    mlm_member.check_position_upgrade()
                     mlm_member.save()
 
                     # Check for position upgrade
-                    mlm_member.check_position_upgrade()
+                    # mlm_member.check_position_upgrade()
                 # Update product stock if requested
                 if update_stock:
                     for item in order.items.all():

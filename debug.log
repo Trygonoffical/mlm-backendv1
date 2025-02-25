@@ -10734,3 +10734,7 @@ WARNING 2025-02-25 13:07:45,624 log 74326 6214774784 Not Found: /api/v1/shipping
 WARNING 2025-02-25 13:07:45,641 log 74326 6232174592 Not Found: /api/v1/shipping/pickup-addresses/
 WARNING 2025-02-25 13:07:51,414 log 74326 6249000960 Not Found: /api/v1/shipping/config/
 WARNING 2025-02-25 13:07:51,433 log 74326 6265827328 Not Found: /api/v1/shipping/config/
+INFO 2025-02-25 14:54:18,470 autoreload 74326 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/home/models.py changed, reloading.
+INFO 2025-02-25 14:54:19,327 autoreload 95102 8587937856 Watching for file changes with StatReloader
+INFO 2025-02-25 15:19:11,267 autoreload 95102 8587937856 /Users/apple/Desktop/Development/MLM_Dev/mlm-backendv1/mlm/appAuth/views.py changed, reloading.
+INFO 2025-02-25 15:19:11,763 autoreload 96292 8587937856 Watching for file changes with StatReloader

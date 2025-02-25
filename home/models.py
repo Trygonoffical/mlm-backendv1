@@ -14,7 +14,8 @@ from datetime import timedelta
 from django.core.exceptions import ValidationError
 from django.db.models import Q, Max, F
 from django.core.validators import MinLengthValidator
-
+from django.db.models.signals import post_save
+from django.dispatch import receiver 
 import logging
 
 logger = logging.getLogger(__name__)
@@ -378,6 +379,11 @@ class MLMMember(models.Model):
     total_earnings = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     created_at = models.DateTimeField(default=timezone.now ) 
     updated_at = models.DateTimeField(default=timezone.now ) 
+    # Add this to your existing MLMMember model
+    first_purchase_bonus_received = models.BooleanField(
+        default=False, 
+        help_text="Flag to track if first purchase bonus has been received"
+    )
     class Meta:
         db_table = 'mlm_members'
 
@@ -424,7 +430,33 @@ class MLMMember(models.Model):
             self.user.save(update_fields=['is_active'])
             
         return self.is_active
-
+    
+    def check_monthly_quota_maintenance(self, month=None):
+        """
+        Check if the member has met their monthly purchase quota
+        
+        Args:
+            month (datetime, optional): Month to check. 
+                                        Defaults to current month.
+        
+        Returns:
+            bool: Whether monthly quota is maintained
+        """
+        if not month:
+            month = timezone.now()
+        
+        # Calculate total purchases for the given month
+        total_monthly_purchases = Order.objects.filter(
+            user=self.user,
+            order_date__year=month.year,
+            order_date__month=month.month,
+            status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+        ).aggregate(
+            total_purchase=models.Sum('final_amount')
+        )['total_purchase'] or Decimal('0.00')
+        
+        # Compare with position's monthly quota
+        return total_monthly_purchases >= self.position.monthly_quota
 
 class KYCDocument(models.Model):
     class DocumentType(models.TextChoices):
@@ -503,11 +535,130 @@ class Commission(models.Model):
     is_paid = models.BooleanField(default=False)
     payment_date = models.DateTimeField(null=True, blank=True)
     level = models.PositiveIntegerField()  # Level in the MLM hierarchy
-
+    # Add this to your existing Commission model
+    is_first_purchase_bonus = models.BooleanField(
+        default=False, 
+        help_text="Flag to indicate if this is a first purchase bonus commission"
+    )
     class Meta:
         db_table = 'commissions'
         ordering = ['-date']
 
+    @classmethod
+    def calculate_commissions(cls, order):
+        """
+        Calculate commissions for an order, considering first purchase and monthly quota
+        
+        Args:
+            order (Order): The order to calculate commissions for
+        
+        Returns:
+            list: Commission objects to be created
+        """
+        try:
+            # Get the member who made the purchase
+            member = order.user.mlm_profile
+            
+            # List to store calculated commissions
+            commissions = []
+            
+            # Track current sponsor
+            current_sponsor = member.sponsor
+            
+            # Traverse up the network
+            level = 1
+            while current_sponsor and level <= 5:  # Limit to 5 levels
+                try:
+                    # Check if sponsor can earn commission
+                    if not current_sponsor.position.can_earn_commission:
+                        current_sponsor = current_sponsor.sponsor
+                        level += 1
+                        continue
+                    
+                    # Check monthly quota maintenance
+                    if not current_sponsor.check_monthly_quota_maintenance():
+                        current_sponsor = current_sponsor.sponsor
+                        level += 1
+                        continue
+                    
+                    # Calculate commission rate for this level
+                    # You might want to adjust this logic based on your specific requirements
+                    level_rates = {
+                        1: 1.0,    # 100% of base rate
+                        2: 0.5,    # 50% of base rate
+                        3: 0.25,   # 25% of base rate
+                        4: 0.125,  # 12.5% of base rate
+                        5: 0.0625  # 6.25% of base rate
+                    }
+                    
+                    # Get base commission rate from position
+                    base_rate = current_sponsor.position.commission_percentage
+                    
+                    # Apply level-based reduction
+                    commission_rate = base_rate * level_rates.get(level, 0.03125)
+                    
+                    # Calculate commission amount
+                    commission_amount = (
+                        order.final_amount * 
+                        Decimal(str(commission_rate)) / 
+                        Decimal('100')
+                    )
+                    
+                    # Special handling for first purchase bonus
+                    is_first_purchase_bonus = False
+                    if (not member.first_purchase_bonus_received and 
+                        level == 1):  # Only for direct sponsor
+                        # Add first purchase bonus (e.g., 1000 rupees)
+                        first_bonus = Decimal('1000.00')
+                        commission_amount += first_bonus
+                        is_first_purchase_bonus = True
+                        
+                        # Mark first purchase bonus as received
+                        member.first_purchase_bonus_received = True
+                        member.save()
+                    
+                    # Create commission
+                    commission_obj = cls(
+                        member=current_sponsor,
+                        from_member=member,
+                        order=order,
+                        amount=commission_amount,
+                        level=level,
+                        is_paid=True,
+                        is_first_purchase_bonus=is_first_purchase_bonus
+                    )
+                    commissions.append(commission_obj)
+                    
+                    # Move to next sponsor
+                    current_sponsor = current_sponsor.sponsor
+                    level += 1
+                
+                except Exception as sponsor_error:
+                    logger.error(f"Error processing sponsor {current_sponsor.id}: {str(sponsor_error)}")
+                    break
+            
+            return commissions
+        
+        except Exception as e:
+            logger.error(f"Error calculating commissions: {str(e)}")
+            return []
+        
+    @receiver(post_save, sender=Order)
+    def process_order_commissions(sender, instance, created, **kwargs):
+        """
+        Process commissions when an order is created and confirmed
+        """
+        if created and instance.status in ['CONFIRMED', 'SHIPPED', 'DELIVERED']:
+            try:
+                # Calculate commissions
+                commissions = Commission.calculate_commissions(instance)
+                
+                # Bulk create commissions
+                if commissions:
+                    Commission.objects.bulk_create(commissions)
+            
+            except Exception as e:
+                logger.error(f"Error processing order commissions: {str(e)}")
 class Wallet(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='wallet')
     balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
