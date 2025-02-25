@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag
+from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag , CommissionActivationRequest , PickupAddress, Shipment, ShipmentStatusUpdate
 from appAuth.serializers import UserSerializer
 from django.db import IntegrityError
 from django.db.models import Sum, Avg, Count, Min, Max
@@ -1738,3 +1738,115 @@ class CustomerDetailSerializer(serializers.ModelSerializer):
             'phone_number', 'date_joined', 'order_count', 'addresses'
         ]
 
+
+
+class CommissionActivationRequestSerializer(serializers.ModelSerializer):
+    requester_name = serializers.CharField(
+        source='requester.user.get_full_name', 
+        read_only=True
+    )
+    requester_member_id = serializers.CharField(
+        source='requester.member_id', 
+        read_only=True
+    )
+    sponsor_name = serializers.CharField(
+        source='sponsor.user.get_full_name', 
+        read_only=True,
+        allow_null=True
+    )
+    sponsor_member_id = serializers.CharField(
+        source='sponsor.member_id', 
+        read_only=True,
+        allow_null=True
+    )
+    processed_by_name = serializers.CharField(
+        source='processed_by.username', 
+        read_only=True,
+        allow_null=True
+    )
+    current_position_name = serializers.CharField(
+        source='current_position.name', 
+        read_only=True
+    )
+    target_position_name = serializers.CharField(
+        source='target_position.name', 
+        read_only=True
+    )
+
+    class Meta:
+        model = CommissionActivationRequest
+        fields = [
+            'id', 
+            'requester', 
+            'requester_name',
+            'requester_member_id',
+            'sponsor',
+            'sponsor_name',
+            'sponsor_member_id',
+            'current_position',
+            'current_position_name',
+            'target_position',
+            'target_position_name',
+            'status', 
+            'created_at', 
+            'processed_at', 
+            'processed_by',
+            'processed_by_name',
+            'reason'
+        ]
+        extra_kwargs = {
+            'requester': {'required': True},
+            'current_position': {'required': True},
+            'target_position': {'required': True},
+            'sponsor': {'required': False, 'allow_null': True},
+            'status': {'read_only': True},
+            'created_at': {'read_only': True},
+            'processed_at': {'read_only': True},
+            'processed_by': {'read_only': True}
+        }
+
+    def validate(self, data):
+        """
+        Additional validation to ensure data consistency
+        """
+        # Ensure required fields are present
+        if not data.get('requester'):
+            raise serializers.ValidationError("Requester is required")
+        
+        if not data.get('current_position'):
+            raise serializers.ValidationError("Current position is required")
+        
+        if not data.get('target_position'):
+            raise serializers.ValidationError("Target position is required")
+        
+        return data
+
+
+
+class PickupAddressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PickupAddress
+        fields = '__all__'
+        read_only_fields = ['address_id', 'customer_id', 'created_at', 'updated_at']
+
+class ShipmentSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    
+    class Meta:
+        model = Shipment
+        fields = [
+            'id', 'order', 'pickup_address', 'awb_number', 'shipment_id', 
+            'courier_name', 'service_type', 'status', 'status_display', 
+            'tracking_url', 'weight', 'length', 'width', 'height', 
+            'is_cod', 'cod_amount', 'shipping_charge', 'created_at'
+        ]
+        read_only_fields = [
+            'awb_number', 'shipment_id', 'courier_name', 
+            'tracking_url', 'shipping_charge', 'created_at'
+        ]
+
+class ShipmentStatusUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShipmentStatusUpdate
+        fields = ['id', 'shipment', 'status', 'status_details', 'location', 'timestamp', 'created_at']
+        read_only_fields = ['created_at']

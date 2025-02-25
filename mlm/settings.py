@@ -221,7 +221,11 @@ SIMPLE_JWT = {
 RAZORPAY_KEY_ID = 'rzp_test_x05a9xxCjRkVBx'
 RAZORPAY_KEY_SECRET = '47qySM0t0VJeRl1V1xMlVcP1'
 
-
+# shipping settings
+QUIXGO_API_BASE_URL = 'https://dev.api.quixgo.com/clientApi'  # Use prod URL for production
+QUIXGO_EMAIL = 'your-email@example.com'  # Replace with your QuixGo account email
+QUIXGO_PASSWORD = 'your-password'  # Replace with your QuixGo account password
+QUIXGO_CUSTOMER_ID = 'your-customer-id'  # This will be obtained after the first login
 
 LOGGING = {
     'version': 1,

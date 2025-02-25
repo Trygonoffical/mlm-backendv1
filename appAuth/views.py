@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest 
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress 
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -17,7 +17,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer , CommissionActivationRequestSerializer ,ShipmentSerializer , PickupAddressSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -106,7 +106,7 @@ class GenerateOTP(APIView):
             return False, "Phone number should be 10-12 digits long"
         return True, "Valid phone number"
     
-    
+
     def post(self, request):
         try:
             phone_number = request.data.get('phone_number')
@@ -5387,8 +5387,11 @@ class OrderTrackingView(APIView):
             # Find the order
             order = get_object_or_404(Order, order_number=order_number)
             
+            # Get shipments for this order
+            shipments = order.shipments.all()
+            
             # Get tracking information
-            tracking_info = self.get_tracking_info(order)
+            tracking_info = self.get_tracking_info(order, shipments)
             
             return Response(tracking_info)
             
@@ -5404,40 +5407,99 @@ class OrderTrackingView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
-    def get_tracking_info(self, order):
-        """Generate tracking information based on order status and dates"""
+    def get_tracking_info(self, order, shipments):
+        """Generate tracking information based on order status and shipments"""
         
         # Initialize dates based on order status
-        confirmed_date = None
+        confirmed_date = order.updated_at if order.status in ['CONFIRMED', 'SHIPPED', 'DELIVERED'] else None
         shipped_date = None
         delivered_date = None
         expected_delivery = None
         current_location = None
         
-        # Set tracking info based on order status
-        if order.status == 'CONFIRMED':
-            confirmed_date = order.updated_at
-            expected_delivery = (order.order_date + timedelta(days=5)).strftime('%Y-%m-%d')
-            current_location = "Order Processing Center"
+        # Shipment details
+        shipment_details = []
+        
+        # If we have shipments, use that data
+        if shipments.exists():
+            shipment = shipments.first()  # Use the first shipment for main tracking info
             
-        elif order.status == 'SHIPPED':
-            confirmed_date = order.order_date + timedelta(days=1)  # Estimate confirmation 1 day after order
-            shipped_date = order.updated_at
-            expected_delivery = (shipped_date + timedelta(days=3)).strftime('%Y-%m-%d')
-            current_location = "In Transit"
+            # Set current status based on shipment
+            if shipment.status == 'BOOKED':
+                shipped_date = None
+                current_location = "Order Processing Center"
+                expected_delivery = (order.order_date + timedelta(days=5)).strftime('%Y-%m-%d')
+            elif shipment.status == 'PICKED_UP':
+                shipped_date = shipment.status_updates.filter(status='PICKED_UP').first().timestamp if shipment.status_updates.filter(status='PICKED_UP').exists() else None
+                current_location = "Shipment Picked Up"
+                expected_delivery = (order.order_date + timedelta(days=4)).strftime('%Y-%m-%d')
+            elif shipment.status == 'IN_TRANSIT':
+                shipped_date = shipment.status_updates.filter(status='PICKED_UP').first().timestamp if shipment.status_updates.filter(status='PICKED_UP').exists() else None
+                current_location = "In Transit"
+                expected_delivery = (order.order_date + timedelta(days=3)).strftime('%Y-%m-%d')
+            elif shipment.status == 'OUT_FOR_DELIVERY':
+                shipped_date = shipment.status_updates.filter(status='PICKED_UP').first().timestamp if shipment.status_updates.filter(status='PICKED_UP').exists() else None
+                current_location = "Out For Delivery"
+                expected_delivery = timezone.now().strftime('%Y-%m-%d')
+            elif shipment.status == 'DELIVERED':
+                shipped_date = shipment.status_updates.filter(status='PICKED_UP').first().timestamp if shipment.status_updates.filter(status='PICKED_UP').exists() else None
+                delivered_date = shipment.status_updates.filter(status='DELIVERED').first().timestamp if shipment.status_updates.filter(status='DELIVERED').exists() else None
+                current_location = "Delivered"
+            elif shipment.status == 'FAILED_DELIVERY':
+                shipped_date = shipment.status_updates.filter(status='PICKED_UP').first().timestamp if shipment.status_updates.filter(status='PICKED_UP').exists() else None
+                current_location = "Delivery Attempt Failed"
+                expected_delivery = (timezone.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            elif shipment.status == 'RETURNED':
+                shipped_date = shipment.status_updates.filter(status='PICKED_UP').first().timestamp if shipment.status_updates.filter(status='PICKED_UP').exists() else None
+                current_location = "Returned to Seller"
+            elif shipment.status == 'CANCELLED':
+                current_location = "Shipment Cancelled"
             
-        elif order.status == 'DELIVERED':
-            confirmed_date = order.order_date + timedelta(days=1)
-            shipped_date = order.order_date + timedelta(days=2)
-            delivered_date = order.updated_at
-            current_location = "Delivered"
+            # Get status history
+            status_history = []
+            for status_update in shipment.status_updates.all():
+                status_history.append({
+                    'status': status_update.status,
+                    'details': status_update.status_details,
+                    'location': status_update.location,
+                    'timestamp': status_update.timestamp.isoformat(),
+                })
             
-        elif order.status == 'CANCELLED':
-            current_location = "Order Cancelled"
-            
-        else:  # PENDING
-            expected_delivery = (order.order_date + timedelta(days=7)).strftime('%Y-%m-%d')
-            current_location = "Order Received"
+            # Add shipment details
+            shipment_details.append({
+                'awb_number': shipment.awb_number,
+                'courier': shipment.courier_name,
+                'status': shipment.status,
+                'weight': str(shipment.weight),
+                'dimensions': f"{shipment.length} x {shipment.width} x {shipment.height} cm",
+                'tracking_url': shipment.tracking_url or f"https://example.com/track?awb={shipment.awb_number}",
+                'status_history': status_history
+            })
+        else:
+            # Set tracking info based on order status if no shipments
+            if order.status == 'CONFIRMED':
+                confirmed_date = order.updated_at
+                expected_delivery = (order.order_date + timedelta(days=5)).strftime('%Y-%m-%d')
+                current_location = "Order Processing Center"
+                
+            elif order.status == 'SHIPPED':
+                confirmed_date = order.order_date + timedelta(days=1)  # Estimate confirmation 1 day after order
+                shipped_date = order.updated_at
+                expected_delivery = (shipped_date + timedelta(days=3)).strftime('%Y-%m-%d')
+                current_location = "In Transit"
+                
+            elif order.status == 'DELIVERED':
+                confirmed_date = order.order_date + timedelta(days=1)
+                shipped_date = order.order_date + timedelta(days=2)
+                delivered_date = order.updated_at
+                current_location = "Delivered"
+                
+            elif order.status == 'CANCELLED':
+                current_location = "Order Cancelled"
+                
+            else:  # PENDING
+                expected_delivery = (order.order_date + timedelta(days=7)).strftime('%Y-%m-%d')
+                current_location = "Order Received"
         
         # Construct the tracking info response
         tracking_info = {
@@ -5452,9 +5514,8 @@ class OrderTrackingView(APIView):
             'current_location': current_location,
             'total_amount': float(order.total_amount),
             'final_amount': float(order.final_amount),
-            # Include customer details if needed
             'shipping_address': order.shipping_address,
-            # You can add more fields here as needed
+            'shipments': shipment_details
         }
         
         return tracking_info
@@ -6003,3 +6064,499 @@ class PasswordResetRequestListView(APIView):
             queryset = queryset.filter(requested_at__date__lte=end_date)
 
         return queryset.order_by('-requested_at')
+    
+
+
+
+
+class CommissionActivationRequestViewSet(viewsets.ModelViewSet):
+    serializer_class = CommissionActivationRequestSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        
+        if user.role == 'ADMIN':
+            # Admin sees all requests
+            return CommissionActivationRequest.objects.select_related(
+                'requester__user', 
+                'sponsor__user', 
+                'current_position', 
+                'target_position'
+            ).all()
+        
+        if user.role == 'MLM_MEMBER':
+            mlm_member = user.mlm_profile
+            # MLM member sees their own requests and requests in their downline
+            return CommissionActivationRequest.objects.select_related(
+                'requester__user', 
+                'sponsor__user', 
+                'current_position', 
+                'target_position'
+            ).filter(
+                Q(requester=mlm_member) | Q(sponsor=mlm_member)
+            )
+        
+        return CommissionActivationRequest.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        try:
+            if request.user.role != 'MLM_MEMBER':
+                return Response({
+                    'error': 'Only MLM members can create commission activation requests'
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            requester = request.user.mlm_profile
+            
+            # Create a new request directly without the serializer
+            activation_request = CommissionActivationRequest.objects.create(
+                requester=requester,
+                sponsor=requester.sponsor,  # This can be None
+                current_position=requester.position,
+                target_position=Position.objects.filter(
+                    can_earn_commission=True,
+                    level_order__gt=requester.position.level_order
+                ).first()
+            )
+            
+            # Create notifications
+            self.create_notifications(activation_request)
+            
+            # Return the created object using the serializer
+            serializer = self.get_serializer(activation_request)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+        except Exception as e:
+            logger.error(f"Error creating commission activation request: {str(e)}")
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    # def create(self, request, *args, **kwargs):
+    #     try:
+
+    #         logger.info(f"Creating commission activation request with data: {request.data}")
+
+    #         # Ensure the requester is an MLM member
+    #         if request.user.role != 'MLM_MEMBER':
+    #             return Response({
+    #                 'error': 'Only MLM members can create commission activation requests'
+    #             }, status=status.HTTP_403_FORBIDDEN)
+
+    #         # Get the current MLM member
+    #         requester = request.user.mlm_profile
+            
+    #         # Check if the member's current position allows commission
+    #         if requester.position.can_earn_commission:
+    #             return Response({
+    #                 'error': 'You are already eligible to earn commissions'
+    #             }, status=status.HTTP_400_BAD_REQUEST)
+
+    #         # Find the next position that allows commission
+    #         target_position = Position.objects.filter(
+    #             can_earn_commission=True,
+    #             level_order__gt=requester.position.level_order
+    #         ).first()
+
+    #         if not target_position:
+    #             return Response({
+    #                 'error': 'No eligible position found for commission activation'
+    #             }, status=status.HTTP_400_BAD_REQUEST)
+
+    #         # Prepare request data - Note the sponsor field is optional
+    #         request_data = {
+    #             'requester': requester.id,
+    #             'current_position': requester.position.id,
+    #             'target_position': target_position.id,
+    #         }
+
+    #         # Add sponsor only if it exists
+    #         if requester.sponsor:
+    #             request_data['sponsor'] = requester.sponsor.id
+
+    #         logger.info(f"Data for serializer: {request_data}")
+
+
+    #         serializer = self.get_serializer(data=request_data)
+    #         if not serializer.is_valid():
+    #             logger.error(f"Serializer validation errors: {serializer.errors}")
+    #             return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+    #         serializer.is_valid(raise_exception=True)
+    #         self.perform_create(serializer)
+            
+    #         return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
+    #     except Exception as e:
+    #         # Error handling
+    #         logger.error(f"Error creating commission activation request: {str(e)}")
+    #         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def create_notifications(self, request_instance):
+        """
+        Create notifications for sponsor and admin
+        """
+        try:
+            # Notification for sponsor (if exists)
+            if request_instance.sponsor:
+                Notification.objects.create(
+                    title='Commission Activation Request',
+                    message=f'New commission activation request from {request_instance.requester.user.get_full_name()}',
+                    notification_type='INDIVIDUAL',
+                    recipient=request_instance.sponsor
+                )
+
+            # Notification for admin
+            Notification.objects.create(
+                title='Commission Activation Request',
+                message=f'New commission activation request from {request_instance.requester.user.get_full_name()}',
+                notification_type='GENERAL'
+            )
+        except Exception as e:
+            logger.error(f"Error creating notifications: {str(e)}")
+
+    @action(detail=True, methods=['POST'], permission_classes=[IsAdminUser])
+    def process_request(self, request, pk=None):
+        try:
+            activation_request = self.get_object()
+            status = request.data.get('status')
+            reason = request.data.get('reason', '')
+
+            if status not in ['APPROVED', 'REJECTED']:
+                return Response({
+                    'error': 'Invalid status'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Use transaction to ensure atomic operation
+            with transaction.atomic():
+                # Update request
+                activation_request.status = status
+                activation_request.processed_by = request.user
+                activation_request.processed_at = timezone.now()
+                activation_request.reason = reason
+                activation_request.save()
+
+                # If approved, update requester's position
+                if status == 'APPROVED':
+                    requester = activation_request.requester
+                    target_position = activation_request.target_position
+
+                    # Update position
+                    requester.position = target_position
+                    requester.save()
+
+                    # Create success notification
+                    Notification.objects.create(
+                        title='Commission Activation Approved',
+                        message=f'Your commission activation request has been approved. Your new position is {target_position.name}',
+                        notification_type='INDIVIDUAL',
+                        recipient=requester
+                    )
+
+                # Create notification for requester
+                Notification.objects.create(
+                    title='Commission Activation Request Processed',
+                    message=f'Your commission activation request has been {status.lower()}.',
+                    notification_type='INDIVIDUAL',
+                    recipient=activation_request.requester
+                )
+
+            return Response({
+                'message': 'Request processed successfully',
+                'status': activation_request.status
+            })
+
+        except Exception as e:
+            logger.error(f"Error processing commission activation request: {str(e)}")
+            return Response({
+                'error': 'Failed to process commission activation request'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+
+
+class PickupAddressViewSet(viewsets.ModelViewSet):
+    queryset = PickupAddress.objects.all()
+    serializer_class = PickupAddressSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            self.permission_classes = [IsAdminUser]
+        return super().get_permissions()
+    
+    def get_queryset(self):
+        queryset = PickupAddress.objects.filter(is_active=True)
+        return queryset
+    
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            # Create address in QuixGo first
+            shipping_service = QuixGoShippingService()
+            response = shipping_service.create_pickup_address(serializer.validated_data)
+            
+            if response['success']:
+                # Save the QuixGo address ID
+                address = serializer.save(
+                    address_id=response['address_id'],
+                    customer_id=shipping_service.customer_id
+                )
+                return Response(self.get_serializer(address).data, status=status.HTTP_201_CREATED)
+            else:
+                return Response(
+                    {'error': 'Failed to create pickup address in QuixGo', 'details': response['error']},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, pk=None):
+        address = self.get_object()
+        address.is_default = True
+        address.save()  # This will unset any other defaults due to the model's save method
+        return Response({'status': 'success', 'message': 'Default pickup address set'})
+
+class ShipmentViewSet(viewsets.ModelViewSet):
+    queryset = Shipment.objects.all()
+    serializer_class = ShipmentSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            self.permission_classes = [IsAdminUser]
+        return super().get_permissions()
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'ADMIN':
+            return Shipment.objects.all()
+        else:
+            return Shipment.objects.filter(order__user=user)
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            # Get the order and pickup address
+            order = get_object_or_404(Order, id=serializer.validated_data['order'].id)
+            pickup_address = get_object_or_404(PickupAddress, id=serializer.validated_data['pickup_address'].id)
+            
+            # Extract shipment data from request
+            shipment_data = {
+                'weight': serializer.validated_data.get('weight', 1.0),
+                'length': serializer.validated_data.get('length', 10.0),
+                'width': serializer.validated_data.get('width', 10.0),
+                'height': serializer.validated_data.get('height', 10.0),
+                'is_cod': serializer.validated_data.get('is_cod', False),
+                'cod_amount': serializer.validated_data.get('cod_amount', 0.0),
+                'courier': serializer.validated_data.get('courier_name', 'DTC'),
+                'service_type': serializer.validated_data.get('service_type', 'SF'),
+                'invoice_value': order.final_amount,
+                'product_name': 'Order Products',
+                'product_type': 'Merchandise',
+                'quantity': '1',
+                'order_number': order.order_number,
+            }
+            
+            # Create delivery address from order shipping address
+            shipping_address = order.shipping_address
+            # Note: You'll need to parse the shipping address from your Order model
+            # This is an example assuming shipping_address is a formatted string
+            delivery_address = {
+                'name': order.user.get_full_name(),
+                'address1': shipping_address.split(',')[0],
+                'address2': shipping_address.split(',')[1] if len(shipping_address.split(',')) > 1 else '',
+                'city': shipping_address.split(',')[2] if len(shipping_address.split(',')) > 2 else '',
+                'state': shipping_address.split(',')[3] if len(shipping_address.split(',')) > 3 else '',
+                'pincode': shipping_address.split(',')[4] if len(shipping_address.split(',')) > 4 else '',
+                'mobile': order.user.phone_number,
+                'email': order.user.email,
+                'addressType': 'Home'
+            }
+            
+            # Get QuixGo pickup address data (already registered)
+            quixgo_pickup_address = {
+                'addressId': pickup_address.address_id,
+                'customerId': pickup_address.customer_id,
+                'pickupName': pickup_address.name,
+                'addressCategory': 'pickup',
+                'addressType': pickup_address.address_type,
+                'shipmentType': 'B2C',
+                'cpPerson': pickup_address.contact_person,
+                'address1': pickup_address.address_line1,
+                'address2': pickup_address.address_line2,
+                'city': pickup_address.city,
+                'state': pickup_address.state,
+                'country': pickup_address.country,
+                'landmark': pickup_address.landmark,
+                'pincode': pickup_address.pincode,
+                'cpMobile': pickup_address.phone,
+                'alternateNumber': pickup_address.alternate_phone,
+                'email': pickup_address.email,
+                'isActive': True,
+                'isDeleted': False,
+                'addName': f"{pickup_address.contact_person}-{pickup_address.pincode}-{pickup_address.customer_id}-{pickup_address.address_id}"
+            }
+            
+            # Book shipment with QuixGo
+            shipping_service = QuixGoShippingService()
+            response = shipping_service.book_shipment(shipment_data, quixgo_pickup_address, delivery_address)
+            
+            if response['success']:
+                # Save shipment details
+                shipment = serializer.save(
+                    awb_number=response['awb_number'],
+                    shipment_id=response['shipment_id'],
+                    courier_name=response['courier'],
+                    shipping_charge=response['charge'],
+                    status='BOOKED',
+                    status_details={'booked_at': timezone.now().isoformat()}
+                )
+                
+                # Create initial status update
+                ShipmentStatusUpdate.objects.create(
+                    shipment=shipment,
+                    status='BOOKED',
+                    status_details=f"Shipment booked with {response['courier']}",
+                    timestamp=timezone.now()
+                )
+                
+                # Update order status if needed
+                order.status = 'SHIPPED'
+                order.save()
+                
+                return Response(self.get_serializer(shipment).data, status=status.HTTP_201_CREATED)
+            else:
+                return Response(
+                    {'error': 'Failed to book shipment', 'details': response['error']},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'])
+    def track(self, request, pk=None):
+        """Track a shipment and update status"""
+        shipment = self.get_object()
+        
+        if not shipment.awb_number:
+            return Response(
+                {'error': 'No AWB number available for tracking'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        shipping_service = QuixGoShippingService()
+        response = shipping_service.track_shipment(shipment.awb_number)
+        
+        if response['success']:
+            # Update shipment status from tracking data
+            current_status = response['current_status']
+            status_mapping = {
+                'Booked': 'BOOKED',
+                'Picked Up': 'PICKED_UP',
+                'In Transit': 'IN_TRANSIT',
+                'Out For Delivery': 'OUT_FOR_DELIVERY',
+                'Delivered': 'DELIVERED',
+                'Undelivered': 'FAILED_DELIVERY',
+                'RTO': 'RETURNED',
+                'Cancelled': 'CANCELLED'
+            }
+            
+            # Map QuixGo status to our status if possible
+            if current_status in status_mapping:
+                shipment.status = status_mapping[current_status]
+            
+            # Save status history
+            shipment.status_details = {
+                'last_updated': timezone.now().isoformat(),
+                'quixgo_status': current_status,
+                'history': response['status_history']
+            }
+            shipment.save()
+            
+            # Create status update entries for each new status
+            for status_entry in response['status_history']:
+                # Check if we already have this status update
+                timestamp = timezone.now()
+                if 'updateDate' in status_entry and status_entry['updateDate']:
+                    try:
+                        timestamp = datetime.fromisoformat(status_entry['updateDate'].replace('Z', '+00:00'))
+                    except ValueError:
+                        pass
+                
+                ShipmentStatusUpdate.objects.get_or_create(
+                    shipment=shipment,
+                    status=status_entry.get('statusName', 'Unknown'),
+                    timestamp=timestamp,
+                    defaults={
+                        'status_details': status_entry.get('comment', ''),
+                        'location': status_entry.get('location', '')
+                    }
+                )
+            
+            # Update order status if needed
+            self.update_order_status(shipment)
+            
+            return Response({
+                'status': shipment.status,
+                'status_history': response['status_history'],
+                'last_updated': timezone.now().isoformat()
+            })
+        else:
+            return Response(
+                {'error': 'Failed to track shipment', 'details': response['error']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel a shipment"""
+        shipment = self.get_object()
+        
+        if not shipment.awb_number:
+            return Response(
+                {'error': 'No AWB number available for cancellation'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        reason = request.data.get('reason', 'Order cancelled')
+        
+        shipping_service = QuixGoShippingService()
+        response = shipping_service.cancel_shipment(shipment.awb_number, reason)
+        
+        if response['success']:
+            # Update shipment status
+            shipment.status = 'CANCELLED'
+            shipment.is_cancelled = True
+            shipment.status_details = {
+                **shipment.status_details,
+                'cancelled_at': timezone.now().isoformat(),
+                'reason': reason
+            }
+            shipment.save()
+            
+            # Create status update
+            ShipmentStatusUpdate.objects.create(
+                shipment=shipment,
+                status='CANCELLED',
+                status_details=reason,
+                timestamp=timezone.now()
+            )
+            
+            return Response({
+                'status': 'success',
+                'message': 'Shipment cancelled successfully'
+            })
+        else:
+            return Response(
+                {'error': 'Failed to cancel shipment', 'details': response['error']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    def update_order_status(self, shipment):
+        """Update the order status based on shipment status"""
+        order = shipment.order
+        
+        if shipment.status == 'DELIVERED':
+            order.status = 'DELIVERED'
+            order.save()
+        elif shipment.status == 'RETURNED':
+            order.status = 'RETURNED'
+            order.save()
+        elif shipment.status == 'CANCELLED' and order.status != 'DELIVERED':
+            order.status = 'CANCELLED'
+            order.save()

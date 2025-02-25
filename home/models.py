@@ -191,7 +191,7 @@ class ProductImage(models.Model):
 class Product(models.Model):
     name = models.CharField(max_length=200)
     slug = models.SlugField(max_length=250, unique=True)
-    HSN_Code = models.SlugField(max_length=50, unique=True , null=True)
+    HSN_Code = models.SlugField(max_length=50, null=True)
     description = models.TextField()
     regular_price = models.DecimalField(max_digits=10, decimal_places=2)
     selling_price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -1221,3 +1221,152 @@ class PasswordResetRequest(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
+
+
+
+class CommissionActivationRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'PENDING', 'Pending'
+        APPROVED = 'APPROVED', 'Approved'
+        REJECTED = 'REJECTED', 'Rejected'
+
+    requester = models.ForeignKey(
+        'MLMMember', 
+        on_delete=models.CASCADE, 
+        related_name='commission_activation_requests'
+    )
+    sponsor = models.ForeignKey(
+        'MLMMember', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='downline_commission_requests'
+    )
+    current_position = models.ForeignKey(
+        'Position', 
+        on_delete=models.CASCADE,
+        related_name='current_commission_requests'
+    )
+    target_position = models.ForeignKey(
+        'Position', 
+        on_delete=models.CASCADE,
+        related_name='target_commission_requests'
+    )
+    status = models.CharField(
+        max_length=20, 
+        choices=Status.choices, 
+        default=Status.PENDING
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    processed_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='processed_commission_requests'
+    )
+    reason = models.TextField(blank=True)
+
+
+
+class ShippingCredential(models.Model):
+    """Store API credentials for shipping providers"""
+    provider_name = models.CharField(max_length=100)  # E.g., 'QuixGo'
+    api_key = models.CharField(max_length=255)
+    api_secret = models.CharField(max_length=255, blank=True, null=True)
+    base_url = models.URLField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.provider_name} API"
+
+class PickupAddress(models.Model):
+    """Store pickup addresses for shipping"""
+    name = models.CharField(max_length=100)
+    address_id = models.CharField(max_length=20, blank=True, null=True)  # QuixGo address ID
+    customer_id = models.CharField(max_length=20, blank=True, null=True)  # QuixGo customer ID
+    contact_person = models.CharField(max_length=100)
+    address_line1 = models.CharField(max_length=255)
+    address_line2 = models.CharField(max_length=255, blank=True)
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    country = models.CharField(max_length=100, default='India')
+    pincode = models.CharField(max_length=10)
+    phone = models.CharField(max_length=15)
+    alternate_phone = models.CharField(max_length=15, blank=True)
+    email = models.EmailField(blank=True)
+    landmark = models.CharField(max_length=255, blank=True)
+    address_type = models.CharField(max_length=20, default='Office')  # Home, Office, Warehouse
+    is_default = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.pincode}"
+    
+    def save(self, *args, **kwargs):
+        # Set as default if it's the first pickup address
+        if not self.pk and not PickupAddress.objects.filter(is_default=True).exists():
+            self.is_default = True
+        
+        # If setting this as default, unset any other defaults
+        if self.is_default:
+            PickupAddress.objects.filter(is_default=True).update(is_default=False)
+            
+        super().save(*args, **kwargs)
+
+class Shipment(models.Model):
+    """Track shipments for orders"""
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('BOOKED', 'Booked'),
+        ('PICKED_UP', 'Picked Up'),
+        ('IN_TRANSIT', 'In Transit'),
+        ('OUT_FOR_DELIVERY', 'Out for Delivery'),
+        ('DELIVERED', 'Delivered'),
+        ('FAILED_DELIVERY', 'Failed Delivery'),
+        ('RETURNED', 'Returned'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='shipments')
+    pickup_address = models.ForeignKey(PickupAddress, on_delete=models.PROTECT)
+    awb_number = models.CharField(max_length=50, blank=True, null=True)
+    shipment_id = models.CharField(max_length=50, blank=True, null=True)  # QuixGo shipment ID
+    courier_name = models.CharField(max_length=50, blank=True, null=True)  # DLV, DTC, SFX
+    service_type = models.CharField(max_length=10, default='SF')  # Express (EXP) or Surface (SF)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    status_details = models.JSONField(default=dict, blank=True)
+    tracking_url = models.URLField(blank=True, null=True)
+    weight = models.DecimalField(max_digits=5, decimal_places=2, default=1.0)
+    length = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
+    width = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
+    height = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
+    is_cod = models.BooleanField(default=False)
+    cod_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    shipping_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
+    is_cancelled = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Shipment {self.awb_number} for Order {self.order.order_number}"
+
+class ShipmentStatusUpdate(models.Model):
+    """Track shipment status updates"""
+    shipment = models.ForeignKey(Shipment, on_delete=models.CASCADE, related_name='status_updates')
+    status = models.CharField(max_length=50)
+    status_details = models.TextField(blank=True)
+    location = models.CharField(max_length=100, blank=True)
+    timestamp = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.status} at {self.timestamp.strftime('%Y-%m-%d %H:%M')}"
