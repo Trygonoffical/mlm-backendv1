@@ -1935,6 +1935,36 @@ class VerifyPaymentView(APIView):
                 'status': 'error',
                 'message': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
+        
+    def send_order_confirmation_sms(self, order):
+        """Send order confirmation SMS using MSG91"""
+        try:
+            # Check if user has phone number
+            if not order.user or not order.user.phone_number:
+                logger.error(f"No phone number available for order {order.order_number}")
+                return
+            
+            # Initialize MSG91 service
+            msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+            
+            # Get user's phone number
+            phone_number = order.user.phone_number
+            
+            # Calculate expected delivery date (e.g., 5 days from now)
+            expected_delivery_date = (datetime.datetime.now() + datetime.timedelta(days=5)).strftime('%d-%m-%Y')
+            
+            # Send confirmation SMS
+            send_result = msg91_service.send_order_confirmation(
+                phone_number=phone_number,
+                order_number=order.order_number,
+                date=expected_delivery_date
+            )
+            
+            if not send_result['success']:
+                logger.error(f"Failed to send order confirmation SMS: {send_result['message']}")
+                
+        except Exception as e:
+            logger.error(f"Error sending order confirmation SMS: {str(e)}")
     # def send_order_confirmation_sms(order):
     #     msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
     #     message = f"Dear User, your order {order.order_number} has been confirmed. Delivery by {order.expected_delivery_date}. For details, visit https://www.yourwebsite.com/OrderTracking"
