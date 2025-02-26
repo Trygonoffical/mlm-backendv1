@@ -1,159 +1,170 @@
 # utils/msg91_utils.py
 import requests
+import http.client
 import logging
+import json
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 class MSG91Service:
-    BASE_URL = "https://control.msg91.com/api/v5"
-    
     def __init__(self, auth_key):
         self.auth_key = auth_key
-    
-    def send_otp(self, phone_number, otp, template_id='1007222030162030703'):
+        self.base_url = "control.msg91.com"
+
+    def send_otp(self, phone_number, otp):
         """
-        Send OTP via MSG91
+        Send OTP using MSG91 Flow API
         
         Args:
-            phone_number (str): Mobile number to send OTP
-            otp (str): OTP to be sent
-            template_id (str, optional): OTP template ID
-        
+            phone_number (str): Phone number to send OTP to (10 digits)
+            otp (str): The OTP code to be sent
+            
         Returns:
-            dict: Response from MSG91
+            dict: Response with success status and message
         """
         try:
-            url = f"{self.BASE_URL}/otp"
+            # Ensure phone number is in correct format (add country code if needed)
+            if phone_number.startswith('+'):
+                mobile = phone_number.lstrip('+')
+            elif phone_number.startswith('91'):
+                mobile = phone_number
+            else:
+                mobile = '91' + phone_number  # Add India country code
+                
+            # Create connection
+            conn = http.client.HTTPSConnection(self.base_url)
+            
+            # Prepare request payload according to MSG91 Flow API documentation
             payload = {
-                "template_id": template_id,
-                "mobile": phone_number,
-                "authkey": self.auth_key,
-                "otp": otp,
-                "message": f"{otp} is OTP to authenticate login credential. Do not share with anyone.",
-                "otp_expiry": 30  # OTP valid for 30 minutes
+                "template_id": "67a6056bbee6b9298c1af3c4",  # Your template ID
+                "short_url": "1",
+                "short_url_expiry": "60Seconds",
+                "realTimeResponse": "1",
+                "recipients": [
+                    {
+                        "mobiles": mobile,
+                        "number": otp,  # This will replace {{otp}} in your template
+                        "VAR2": "VALUE 2"  # Additional variables if needed
+                    }
+                ]
             }
             
+            # Set headers
             headers = {
-                'Content-Type': 'application/json'
+                'authkey': self.auth_key,
+                'accept': "application/json",
+                'content-type': "application/json"
             }
             
-            response = requests.post(url, json=payload, headers=headers)
-            response_data = response.json()
+            # Make the request
+            conn.request("POST", "/api/v5/flow", json.dumps(payload), headers)
             
-            logger.info(f"OTP Send Response: {response_data}")
+            # Get response
+            response = conn.getresponse()
+            data = response.read().decode("utf-8")
             
-            return {
-                'success': response.status_code == 200,
-                'message': response_data.get('message', 'Unknown response'),
-                'details': response_data
-            }
-        
+            # Log response
+            logger.info(f"OTP Send Response: {data}")
+            
+            # Parse response
+            response_data = json.loads(data)
+            
+            if response.status == 200 and not response_data.get('type') == 'error':
+                return {
+                    'success': True,
+                    'message': 'OTP sent successfully',
+                    'response': response_data
+                }
+            else:
+                error_msg = response_data.get('msg', 'Unknown error')
+                logger.error(f"MSG91 API Error: {error_msg}")
+                return {
+                    'success': False,
+                    'message': f'Failed to send OTP: {error_msg}',
+                    'response': response_data
+                }
+                
         except Exception as e:
             logger.error(f"Error sending OTP: {str(e)}")
             return {
                 'success': False,
-                'message': str(e),
-                'details': None
+                'message': f'Error sending OTP: {str(e)}'
             }
     
-    def verify_otp(self, phone_number, otp):
+    def send_transactional_sms(self, phone_number, message):
         """
-        Verify OTP sent via MSG91
+        Send transactional SMS using MSG91 API
         
         Args:
-            phone_number (str): Mobile number
-            otp (str): OTP to verify
-        
-        Returns:
-            dict: Verification response
-        """
-        try:
-            url = f"{self.BASE_URL}/otp/verify"
-            payload = {
-                "mobile": phone_number,
-                "otp": otp,
-                "authkey": self.auth_key
-            }
-            
-            headers = {
-                'Content-Type': 'application/json'
-            }
-            
-            response = requests.post(url, json=payload, headers=headers)
-            response_data = response.json()
-            
-            logger.info(f"OTP Verify Response: {response_data}")
-            
-            return {
-                'success': response.status_code == 200,
-                'message': response_data.get('message', 'Unknown response'),
-                'details': response_data
-            }
-        
-        except Exception as e:
-            logger.error(f"Error verifying OTP: {str(e)}")
-            return {
-                'success': False,
-                'message': str(e),
-                'details': None
-            }
-    
-    def send_transactional_sms(self, phone_number, message, template_id='1007359457599426993'):
-        """
-        Send transactional SMS via MSG91
-        
-        Args:
-            phone_number (str): Mobile number
+            phone_number (str): Phone number to send SMS to
             message (str): Message content
-            template_id (str, optional): SMS template ID
-        
+            
         Returns:
-            dict: SMS send response
+            dict: Response with success status and message
         """
         try:
-            url = f"{self.BASE_URL}/notifications/send"
+            # Ensure phone number is in correct format (add country code if needed)
+            if phone_number.startswith('+'):
+                mobile = phone_number.lstrip('+')
+            elif phone_number.startswith('91'):
+                mobile = phone_number
+            else:
+                mobile = '91' + phone_number  # Add India country code
+                
+            # Create connection
+            conn = http.client.HTTPSConnection(self.base_url)
+            
+            # Prepare request payload for SMS API
             payload = {
-                "template_id": template_id,
-                "sender": "HERBPW",
-                "short_url": 0,  # Disable URL shortening
-                "mobiles": phone_number,
-                "entity_id": "1001766978661064894",  # Entity ID from credentials
-                "message": message
+                "sender": "TXTLCL",  # Replace with your sender ID
+                "route": "4",  # 4 for transactional, 1 for promotional
+                "country": "91",
+                "sms": [
+                    {
+                        "message": message,
+                        "to": [mobile]
+                    }
+                ]
             }
             
+            # Set headers
             headers = {
-                'Content-Type': 'application/json',
-                'authkey': self.auth_key
+                'authkey': self.auth_key,
+                'content-type': "application/json"
             }
             
-            response = requests.post(url, json=payload, headers=headers)
-            response_data = response.json()
+            # Make the request
+            conn.request("POST", "/api/v5/flow/", json.dumps(payload), headers)
             
-            logger.info(f"SMS Send Response: {response_data}")
+            # Get response
+            response = conn.getresponse()
+            data = response.read().decode("utf-8")
             
-            return {
-                'success': response.status_code == 200,
-                'message': response_data.get('message', 'Unknown response'),
-                'details': response_data
-            }
-        
+            # Log response
+            logger.info(f"SMS Send Response: {data}")
+            
+            # Parse response
+            response_data = json.loads(data)
+            
+            if response.status == 200 and not response_data.get('type') == 'error':
+                return {
+                    'success': True,
+                    'message': 'SMS sent successfully',
+                    'response': response_data
+                }
+            else:
+                error_msg = response_data.get('msg', 'Unknown error')
+                logger.error(f"MSG91 API Error: {error_msg}")
+                return {
+                    'success': False,
+                    'message': f'Failed to send SMS: {error_msg}',
+                    'response': response_data
+                }
+                
         except Exception as e:
             logger.error(f"Error sending SMS: {str(e)}")
             return {
                 'success': False,
-                'message': str(e),
-                'details': None
+                'message': f'Error sending SMS: {str(e)}'
             }
-
-# def send_order_confirmation_sms(order):
-#     msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
-#     message = f"Dear User, your order {order.order_number} has been confirmed. Delivery by {order.expected_delivery_date}. For details, visit https://www.yourwebsite.com/OrderTracking"
-    
-#     result = msg91_service.send_transactional_sms(
-#         order.user.phone_number, 
-#         message
-#     )
-    
-#     if not result['success']:
-#         logger.error(f"Failed to send order confirmation SMS: {result['message']}")
