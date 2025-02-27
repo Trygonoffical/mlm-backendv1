@@ -106,7 +106,6 @@ class GenerateOTP(APIView):
             return False, "Phone number should be 10-12 digits long"
         return True, "Valid phone number"
     
-
     def post(self, request):
         try:
             phone_number = request.data.get('phone_number')
@@ -128,11 +127,40 @@ class GenerateOTP(APIView):
                         'message': 'This number is registered as a non-customer user'
                     }, status=status.HTTP_400_BAD_REQUEST)
 
+                # Get or create PhoneOTP object
+                phone_otp, created = PhoneOTP.objects.get_or_create(
+                    phone_number=phone_number,
+                    defaults={'otp': '', 'count': 0}
+                )
+
+                # Check if the OTP is blocked and reset if time has passed
+                if not created:
+                    # Check if blocking period has expired
+                    time_elapsed = timezone.now() - phone_otp.last_attempt
+                    
+                    # Add debug logging
+                    logger.info(f"Time elapsed since last attempt: {time_elapsed}")
+                    logger.info(f"Current count: {phone_otp.count}")
+                    
+                    # Reset if 30 minutes have passed since last attempt and count >= 5
+                    if phone_otp.count >= 5 and time_elapsed >= timedelta(minutes=30):
+                        logger.info("Resetting OTP attempt count")
+                        phone_otp.count = 0
+                        phone_otp.save()
+                
+                # After potential reset, check if still blocked
+                if phone_otp.count >= 5:
+                    minutes_left = max(0, 30 - (timezone.now() - phone_otp.last_attempt).seconds // 60)
+                    return Response({
+                        'status': False,
+                        'message': f'Maximum OTP attempts reached. Please try again after {minutes_left} minutes.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Generate 6-digit OTP
+                otp = str(random.randint(100000, 999999))
+
                 # Initialize MSG91 service
                 msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
-
-                # Generate 6 digit OTP
-                otp = str(random.randint(100000, 999999))
 
                 # Send OTP via MSG91
                 send_result = msg91_service.send_otp(phone_number, otp)
@@ -144,33 +172,17 @@ class GenerateOTP(APIView):
                         'message': f'Failed to send OTP: {send_result["message"]}'
                     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-                # Save or update OTP
-                phone_otp, created = PhoneOTP.objects.get_or_create(
-                    phone_number=phone_number,
-                    defaults={'otp': otp}
-                )
-
-                if not created:
-                    # Check if blocked period has expired
-                    phone_otp.reset_if_expired()
-                    
-                    # Check if still blocked
-                    if phone_otp.is_blocked():
-                        minutes_left = 30 - ((timezone.now() - phone_otp.last_attempt).seconds // 60)
-                        return Response({
-                            'status': False,
-                            'message': f'Maximum OTP attempts reached. Please try again after {minutes_left} minutes.'
-                        }, status=status.HTTP_400_BAD_REQUEST)
-
-                    phone_otp.otp = otp
-                    phone_otp.is_verified = False
-                    phone_otp.count += 1
-                    phone_otp.save()
+                # Update OTP in database
+                phone_otp.otp = otp
+                phone_otp.is_verified = False
+                phone_otp.count += 1
+                phone_otp.last_attempt = timezone.now()
+                phone_otp.save()
 
                 return Response({
                     'status': True,
                     'message': 'OTP sent successfully',
-                    'attempts_left': 5 - phone_otp.count,
+                    'attempts_left': max(0, 5 - phone_otp.count),
                     'otp': otp  # Remove in production
                 })
 
@@ -187,6 +199,97 @@ class GenerateOTP(APIView):
                 'status': False,
                 'message': 'Unexpected error occurred'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # def validate_phone_number(self, phone_number):
+    #     """Validate phone number format"""
+    #     if not phone_number:
+    #         return False, "Phone number is required"
+    #     if not phone_number.isdigit():
+    #         return False, "Phone number should contain only digits"
+    #     if not (10 <= len(phone_number) <= 12):
+    #         return False, "Phone number should be 10-12 digits long"
+    #     return True, "Valid phone number"
+    
+
+    # def post(self, request):
+    #     try:
+    #         phone_number = request.data.get('phone_number')
+
+    #         # Validate phone number
+    #         is_valid, message = self.validate_phone_number(phone_number)
+    #         if not is_valid:
+    #             return Response({
+    #                 'status': False,
+    #                 'message': message
+    #             }, status=status.HTTP_400_BAD_REQUEST)
+
+    #         try:
+    #             # Check if user exists and is not a customer
+    #             user = User.objects.filter(phone_number=phone_number).first()
+    #             if user and user.role != 'CUSTOMER':
+    #                 return Response({
+    #                     'status': False,
+    #                     'message': 'This number is registered as a non-customer user'
+    #                 }, status=status.HTTP_400_BAD_REQUEST)
+
+    #             # Initialize MSG91 service
+    #             msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+
+    #             # Generate 6 digit OTP
+    #             otp = str(random.randint(100000, 999999))
+
+    #             # Send OTP via MSG91
+    #             send_result = msg91_service.send_otp(phone_number, otp)
+
+    #             # Check if OTP sending was successful
+    #             if not send_result['success']:
+    #                 return Response({
+    #                     'status': False,
+    #                     'message': f'Failed to send OTP: {send_result["message"]}'
+    #                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    #             # Save or update OTP
+    #             phone_otp, created = PhoneOTP.objects.get_or_create(
+    #                 phone_number=phone_number,
+    #                 defaults={'otp': otp}
+    #             )
+
+    #             if not created:
+    #                 # Check if blocked period has expired
+    #                 phone_otp.reset_if_expired()
+                    
+    #                 # Check if still blocked
+    #                 if phone_otp.is_blocked():
+    #                     minutes_left = 30 - ((timezone.now() - phone_otp.last_attempt).seconds // 60)
+    #                     return Response({
+    #                         'status': False,
+    #                         'message': f'Maximum OTP attempts reached. Please try again after {minutes_left} minutes.'
+    #                     }, status=status.HTTP_400_BAD_REQUEST)
+
+    #                 phone_otp.otp = otp
+    #                 phone_otp.is_verified = False
+    #                 phone_otp.count += 1
+    #                 phone_otp.save()
+
+    #             return Response({
+    #                 'status': True,
+    #                 'message': 'OTP sent successfully',
+    #                 'attempts_left': 5 - phone_otp.count,
+    #                 'otp': otp  # Remove in production
+    #             })
+
+    #         except Exception as e:
+    #             logger.error(f"Error in GenerateOTP: {str(e)}")
+    #             return Response({
+    #                 'status': False,
+    #                 'message': 'Internal server error'
+    #             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    #     except Exception as e:
+    #         logger.error(f"Unexpected error in GenerateOTP: {str(e)}")
+    #         return Response({
+    #             'status': False,
+    #             'message': 'Unexpected error occurred'
+    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     # def post(self, request):
     #     phone_number = request.data.get('phone_number')
 
@@ -6592,3 +6695,295 @@ class ShipmentViewSet(viewsets.ModelViewSet):
         elif shipment.status == 'CANCELLED' and order.status != 'DELIVERED':
             order.status = 'CANCELLED'
             order.save()
+
+
+
+class MLMMemberReportsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            # Ensure the user is an MLM member
+            if request.user.role != 'MLM_MEMBER':
+                return Response({
+                    'error': 'Unauthorized access'
+                }, status=403)
+
+            # Get the MLM member profile
+            mlm_member = MLMMember.objects.get(user=request.user)
+
+            # Get report type and filters
+            report_type = request.query_params.get('type', '')
+            start_date = request.query_params.get('start_date')
+            end_date = request.query_params.get('end_date')
+            period = request.query_params.get('period', 'monthly')
+
+            # Base date filtering
+            if start_date:
+                start_date = timezone.datetime.strptime(start_date, '%Y-%m-%d').date()
+            else:
+                start_date = timezone.now().date() - timezone.timedelta(days=180)
+
+            if end_date:
+                end_date = timezone.datetime.strptime(end_date, '%Y-%m-%d').date()
+            else:
+                end_date = timezone.now().date()
+
+            # Dispatch to specific report generation method
+            if report_type == 'commissions':
+                return self.generate_commissions_report(mlm_member, start_date, end_date)
+            
+            elif report_type == 'sales':
+                return self.generate_sales_report(mlm_member, start_date, end_date, period)
+            
+            elif report_type == 'team_performance':
+                return self.generate_team_performance_report(mlm_member, start_date, end_date)
+            
+            elif report_type == 'network_growth':
+                return self.generate_network_growth_report(mlm_member, start_date, end_date, period)
+            
+            else:
+                return Response({
+                    'error': 'Invalid report type'
+                }, status=400)
+
+        except Exception as e:
+            logger.error(f"MLM Member Reports Error: {str(e)}")
+            return Response({
+                'error': 'Failed to generate report'
+            }, status=500)
+
+    def generate_commissions_report(self, mlm_member, start_date, end_date):
+        """
+        Generate detailed commissions report for the MLM member
+        """
+        # Filter commissions
+        commissions = Commission.objects.filter(
+            member=mlm_member,
+            date__date__gte=start_date,
+            date__date__lte=end_date
+        ).select_related('from_member__user')
+
+        # Prepare report data
+        report_data = [
+            {
+                'date': commission.date,
+                'from_member_name': commission.from_member.user.get_full_name(),
+                'level': commission.level,
+                'amount': float(commission.amount),
+                'is_paid': commission.is_paid
+            }
+            for commission in commissions
+        ]
+
+        return Response({
+            'report_type': 'commissions',
+            'data': report_data
+        })
+
+    def generate_sales_report(self, mlm_member, start_date, end_date, period='monthly'):
+        """
+        Generate personal sales report
+        """
+        # Filter orders for the member
+        orders = Order.objects.filter(
+            user=mlm_member.user,
+            order_date__date__gte=start_date,
+            order_date__date__lte=end_date,
+            status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+        )
+
+        # Group by period
+        if period == 'daily':
+            period_func = TruncDay('order_date')
+        elif period == 'weekly':
+            period_func = TruncWeek('order_date')
+        else:  # monthly
+            period_func = TruncMonth('order_date')
+
+        # Aggregate sales data
+        sales_report = orders.annotate(
+            period=period_func
+        ).values('period').annotate(
+            total_orders=Count('id'),
+            total_revenue=Sum('final_amount'),
+            total_bp=Sum('total_bp'),
+            avg_order_value=Avg('final_amount')
+        ).order_by('period')
+
+        # Convert to list and format periods
+        report_data = []
+        for item in sales_report:
+            formatted_item = {
+                'period': self.format_period(item['period'], period),
+                'total_orders': item['total_orders'],
+                'total_revenue': float(item['total_revenue']),
+                'total_bp': item['total_bp'],
+                'avg_order_value': float(item['avg_order_value'])
+            }
+            report_data.append(formatted_item)
+
+        # Calculate summary
+        summary = {
+            'total_revenue': float(orders.aggregate(total=Sum('final_amount'))['total'] or 0),
+            'total_orders': orders.count(),
+            'total_bp': orders.aggregate(total=Sum('total_bp'))['total'] or 0,
+            'avg_order_value': float(orders.aggregate(avg=Avg('final_amount'))['avg'] or 0)
+        }
+
+        return Response({
+            'report_type': 'sales',
+            'data': report_data,
+            'summary': summary
+        })
+
+    def generate_team_performance_report(self, mlm_member, start_date, end_date):
+        """
+        Generate team performance report by network levels
+        """
+        # Recursive function to get all downline members
+        def get_downline_members(current_member, max_level=5):
+            downline = {}
+            
+            def traverse(member, current_level=1):
+                if current_level > max_level:
+                    return
+                
+                # Get direct referrals
+                referrals = MLMMember.objects.filter(sponsor=member)
+                
+                if current_level not in downline:
+                    downline[current_level] = []
+                
+                for referral in referrals:
+                    downline[current_level].append(referral)
+                    traverse(referral, current_level + 1)
+            
+            traverse(current_member)
+            return downline
+
+        # Get downline members
+        downline_members = get_downline_members(mlm_member)
+
+        # Prepare report data
+        report_data = []
+        for level, members in downline_members.items():
+            # Collect user IDs for this level
+            member_ids = [m.user.id for m in members]
+            
+            # Calculate sales and commissions
+            level_orders = Order.objects.filter(
+                user_id__in=member_ids,
+                order_date__date__gte=start_date,
+                order_date__date__lte=end_date,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            )
+            
+            # Calculate metrics
+            level_data = {
+                'level': level,
+                'total_members': len(members),
+                'total_sales': float(level_orders.aggregate(total=Sum('final_amount'))['total'] or 0),
+                'total_commissions': float(Commission.objects.filter(
+                    from_member__in=members,
+                    date__date__gte=start_date,
+                    date__date__lte=end_date
+                ).aggregate(total=Sum('amount'))['total'] or 0),
+                'total_bp': level_orders.aggregate(total=Sum('total_bp'))['total'] or 0
+            }
+            
+            report_data.append(level_data)
+
+        return Response({
+            'report_type': 'team_performance',
+            'data': report_data
+        })
+
+    def generate_network_growth_report(self, mlm_member, start_date, end_date, period='monthly'):
+        """
+        Generate network growth report
+        """
+        # Determine period grouping function
+        if period == 'daily':
+            period_func = TruncDay('join_date')
+        elif period == 'weekly':
+            period_func = TruncWeek('join_date')
+        elif period == 'yearly':
+            period_func = TruncYear('join_date')
+        else:  # monthly
+            period_func = TruncMonth('join_date')
+
+        # Get all downline members recursively
+        def get_all_downline(current_member):
+            downline = set()
+            
+            def traverse(member):
+                referrals = MLMMember.objects.filter(sponsor=member)
+                for referral in referrals:
+                    downline.add(referral)
+                    traverse(referral)
+            
+            traverse(current_member)
+            return downline
+
+        # Get all downline members
+        downline_members = get_all_downline(mlm_member)
+
+        # Calculate network growth
+        network_growth = MLMMember.objects.filter(
+            sponsor=mlm_member,
+            join_date__date__gte=start_date,
+            join_date__date__lte=end_date
+        ).annotate(
+            period=period_func
+        ).values('period').annotate(
+            new_members=Count('id'),
+            total_network_size=Count('id'),  # This will need refinement
+            total_bp=Sum('total_bp')
+        ).order_by('period')
+
+        # Prepare report data
+        report_data = []
+        for item in network_growth:
+            # Calculate total sales for new members in this period
+            period_members = MLMMember.objects.filter(
+                sponsor=mlm_member,
+                join_date__date__gte=start_date,
+                join_date__date__lte=end_date,
+                period=item['period']
+            )
+            
+            period_sales = Order.objects.filter(
+                user__in=[m.user for m in period_members],
+                order_date__date__gte=start_date,
+                order_date__date__lte=end_date,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            )
+
+            formatted_item = {
+                'period': self.format_period(item['period'], period),
+                'new_members': item['new_members'],
+                'total_network_size': item['total_network_size'],
+                'total_bp': item['total_bp'],
+                'total_sales': float(period_sales.aggregate(total=Sum('final_amount'))['total'] or 0)
+            }
+            report_data.append(formatted_item)
+
+        return Response({
+            'report_type': 'network_growth',
+            'data': report_data
+        })
+
+    def format_period(self, period, period_type):
+        """
+        Format period based on period type
+        """
+        if period_type == 'daily':
+            return period.strftime('%Y-%m-%d')
+        elif period_type == 'weekly':
+            return f"Week {period.strftime('%U')}, {period.year}"
+        elif period_type == 'monthly':
+            return period.strftime('%B %Y')
+        elif period_type == 'yearly':
+            return str(period.year)
+        return str(period)

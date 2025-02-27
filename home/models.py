@@ -134,17 +134,32 @@ class PhoneOTP(models.Model):
     last_attempt = models.DateTimeField(auto_now=True)
     
     def is_blocked(self):
+        """Check if this phone number is currently blocked from receiving OTPs"""
         if self.count >= 5:
             time_elapsed = timezone.now() - self.last_attempt
             return time_elapsed < timedelta(minutes=30)
         return False
 
     def reset_if_expired(self):
+        """Reset the counter if the blocking period has expired"""
         if self.count >= 5:
             time_elapsed = timezone.now() - self.last_attempt
             if time_elapsed >= timedelta(minutes=30):
                 self.count = 0
+                # Also important: update the last_attempt time
+                self.last_attempt = timezone.now()
                 self.save()
+                return True
+        return False
+    
+    def time_remaining(self):
+        """Return the time remaining in minutes before unblocking"""
+        if not self.is_blocked():
+            return 0
+            
+        time_elapsed = timezone.now() - self.last_attempt
+        remaining_seconds = max(0, (timedelta(minutes=30) - time_elapsed).total_seconds())
+        return int(remaining_seconds // 60)
 
     class Meta:
         db_table = 'phone_otps'
