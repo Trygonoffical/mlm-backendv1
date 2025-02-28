@@ -844,11 +844,11 @@ class MLMMemberViewSet(viewsets.ModelViewSet):
                         logger.warning(f"Sponsor with ID {request.data.get('sponsor_id')} not found")
                 
                 # Send welcome email
-                send_welcome_email(
-                    member.user, 
-                    password, 
-                    sponsor
-                )
+                # send_welcome_email(
+                #     member.user, 
+                #     password, 
+                #     sponsor
+                # )
             
             # Prepare response
             headers = self.get_success_headers(serializer.data)
@@ -4236,270 +4236,331 @@ class MLMDashboardView(APIView):
             # Ensure the user is an MLM member
             if request.user.role != 'MLM_MEMBER':
                 return Response({
-                    'error': 'Unauthorized access'
+                    'status': False,
+                    'message': 'Only MLM members can access this dashboard'
                 }, status=status.HTTP_403_FORBIDDEN)
-
-            # Get the MLM member profile
-            member = self.get_mlm_member(request.user)
-            if not member:
-                return Response({
-                    'error': 'MLM member profile not found'
-                }, status=status.HTTP_404_NOT_FOUND)
-
-            # Prepare dashboard data
-            dashboard_data = {
-                # Income Details
-                'total_income': self.safe_calculate_total_income(member),
-                'current_month_income': self.safe_calculate_current_month_income(member),
-                'self_income': self.safe_calculate_self_income(member),
-                'team_income': self.safe_calculate_team_income(member),
-                'bonus_income': self.safe_calculate_bonus_income(member),
-
-                # Team Details
-                'total_team_members': self.safe_get_total_team_members(member),
-                'total_team_commission': self.safe_calculate_total_team_commission(member),
-
-                # Rank Details
-                'current_rank': member.position.name if member.position else 'N/A',
-                'rank_target': float(member.current_month_purchase) if member else 0,  # Replaced sales_target
                 
-                # Add total_bp to the dashboard data
+            # Get the MLM member profile
+            member = request.user.mlm_profile
+            
+            # Get verification status information
+            kyc_verification_status = self.get_kyc_verification_status(member)
+            bank_verification_status = self.get_bank_verification_status(member)
+            
+            # Get monthly quota status
+            monthly_quota_status, monthly_quota_remaining = self.get_monthly_quota_status(member)
+            
+            # Calculate metrics
+            total_income = float(member.total_earnings)
+            
+            # Get current month's earnings
+            current_month = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            current_month_income = float(Commission.objects.filter(
+                member=member,
+                date__gte=current_month,
+                is_paid=True
+            ).aggregate(Sum('amount'))['amount__sum'] or 0)
+            
+            # Calculate network size
+            total_team_members = self.get_total_network_size(member)
+            
+            # Get self income, team income, and bonus income
+            self_income = float(member.current_month_purchase or 0)
+            team_income = float(Commission.objects.filter(
+                member=member,
+                from_member__isnull=False,
+                is_first_purchase_bonus=False
+            ).aggregate(Sum('amount'))['amount__sum'] or 0)
+            bonus_income = float(Commission.objects.filter(
+                member=member,
+                is_first_purchase_bonus=True
+            ).aggregate(Sum('amount'))['amount__sum'] or 0)
+            
+            # Get monthly performance data
+            monthly_performance = self.get_monthly_performance(member)
+            
+            # Get featured products
+            featured_products = self.get_featured_products()
+            
+            # Get recent purchases (last 3)
+            recent_purchases = self.get_recent_purchases(member)
+            
+            # Get recent orders
+            recent_orders = self.get_recent_orders(member)
+            
+            # Total team commission
+            total_team_commission = team_income + bonus_income
+            
+            # Current rank and target
+            current_rank = member.position.name
+            current_rank_level = member.position.level_order
+            
+            # Find next rank
+            try:
+                next_rank = Position.objects.filter(
+                    level_order__gt=current_rank_level,
+                    is_active=True
+                ).order_by('level_order').first()
+                
+                rank_target = float(next_rank.monthly_quota) if next_rank else 0
+            except Exception as e:
+                logger.error(f"Error getting next rank: {str(e)}")
+                rank_target = 0
+            
+            response_data = {
+                'total_income': total_income,
+                'current_month_income': current_month_income,
+                'total_team_members': total_team_members,
+                'self_income': self_income,
+                'team_income': team_income,
+                'bonus_income': bonus_income,
+                'current_rank': current_rank,
+                'current_rank_level': current_rank_level,
+                'rank_target': rank_target,
                 'total_bp': member.total_bp,
-
-                # Performance Data
-                'monthly_performance': self.safe_get_monthly_performance(member),
-
-                # Featured Products
-                'featured_products': self.safe_get_featured_products(),
-
-                # Recent Orders
-                'recent_orders': self.safe_get_recent_orders(member)
+                'monthly_performance': monthly_performance,
+                'featured_products': featured_products,
+                'recent_purchases': recent_purchases,
+                'recent_orders': recent_orders,
+                'total_team_commission': total_team_commission,
+                
+                # Verification statuses
+                'kyc_status': kyc_verification_status,
+                'bank_verification_status': bank_verification_status,
+                'monthly_quota_status': monthly_quota_status,
+                'monthly_quota_remaining': monthly_quota_remaining
             }
-
-            return Response(dashboard_data)
-
+            
+            return Response(response_data)
+            
         except Exception as e:
-            logger.error(f"MLM Dashboard error: {str(e)}", exc_info=True)
+            logger.error(f"Error in MLM dashboard: {str(e)}")
             return Response({
-                'error': 'Failed to load dashboard',
-                'details': str(e)
+                'status': False,
+                'message': 'Failed to load dashboard data',
+                'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def safe_calculate_bonus_income(self, member):
+    def get_kyc_verification_status(self, member):
         """
-        Calculate bonus income
-        """
-        try:
-            from home.models import Commission
-            bonus_commissions = Commission.objects.filter(
-                member=member,
-                is_paid=True
-            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-
-            return float(bonus_commissions)
-        except Exception as e:
-            logger.error(f"Error calculating bonus income: {str(e)}")
-            return 0.00
-
-    def safe_calculate_total_team_commission(self, member):
-        """
-        Calculate total team commission
+        Check if all required KYC documents are verified
         """
         try:
-            from home.models import Commission
-            total_commission = Commission.objects.filter(
-                member=member,
-                is_paid=True
-            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-
-            return float(total_commission)
-        except Exception as e:
-            logger.error(f"Error calculating total team commission: {str(e)}")
-            return 0.00
-
-    def get_mlm_member(self, user):
-        """
-        Safely retrieve MLM member profile
-        """
-        try:
-            from home.models import MLMMember
-            return MLMMember.objects.select_related('user', 'position').get(user=user)
-        except Exception as e:
-            logger.error(f"Error retrieving MLM member: {str(e)}")
-            return None
-
-    def safe_calculate_total_income(self, member):
-        """
-        Calculate total income from all sources
-        """
-        try:
-            from home.models import Commission, WalletTransaction
-
-            # Calculate commissions
-            total_commissions = Commission.objects.filter(
-                member=member, 
-                is_paid=True
-            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-
-            # Calculate wallet income from commissions
-            wallet_income = WalletTransaction.objects.filter(
-                wallet__user=member.user,
-                transaction_type='COMMISSION'
-            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-
-            return float(total_commissions + wallet_income)
-        except Exception as e:
-            logger.error(f"Error calculating total income: {str(e)}")
-            return 0.00
-
-    def safe_calculate_current_month_income(self, member):
-        """
-        Calculate current month's income
-        """
-        try:
-            from home.models import Commission
-            current_month = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            # Get all KYC documents
+            kyc_docs = KYCDocument.objects.filter(mlm_member=member)
             
-            current_month_commissions = Commission.objects.filter(
-                member=member,
-                is_paid=True,
-                date__gte=current_month
-            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-
-            return float(current_month_commissions)
+            # If no documents, return pending
+            if not kyc_docs.exists():
+                return "PENDING"
+                
+            # Get required document types
+            required_doc_types = ['AADHAR', 'PAN']
+            
+            # Check if all required documents are verified
+            for doc_type in required_doc_types:
+                try:
+                    doc = kyc_docs.get(document_type=doc_type)
+                    if doc.status == 'REJECTED':
+                        return "REJECTED"
+                    elif doc.status != 'VERIFIED':
+                        return "PENDING"
+                except KYCDocument.DoesNotExist:
+                    return "PENDING"
+            
+            # If all checks pass, return verified
+            return "VERIFIED"
+            
         except Exception as e:
-            logger.error(f"Error calculating current month income: {str(e)}")
-            return 0.00
-
-    def safe_calculate_self_income(self, member):
+            logger.error(f"Error checking KYC status: {str(e)}")
+            return "PENDING"
+    
+    def get_bank_verification_status(self, member):
         """
-        Calculate personal sales income
+        Check if bank details are verified
         """
         try:
-            from home.models import Order
-            self_sales = Order.objects.filter(
-                user=member.user, 
-                status='DELIVERED'
-            ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
-
-            return float(self_sales)
+            # Check if bank details exist
+            try:
+                bank_details = BankDetails.objects.get(mlm_member=member)
+                return "VERIFIED" if bank_details.is_verified else "PENDING"
+            except BankDetails.DoesNotExist:
+                return "PENDING"
         except Exception as e:
-            logger.error(f"Error calculating self income: {str(e)}")
-            return 0.00
-
-    def safe_calculate_team_income(self, member):
+            logger.error(f"Error checking bank verification status: {str(e)}")
+            return "PENDING"
+    
+    def get_monthly_quota_status(self, member):
         """
-        Calculate team income from downline
+        Check monthly quota status
         """
         try:
-            from home.models import Commission
-            team_income = Commission.objects.filter(
-                from_member__sponsor=member
-            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-
-            return float(team_income)
+            # Get position
+            position = member.position
+            
+            # Get current month purchases
+            current_month_purchase = float(member.current_month_purchase or 0)
+            
+            # Get required monthly quota
+            monthly_quota = float(position.monthly_quota)
+            
+            # Calculate remaining amount
+            remaining = max(0, monthly_quota - current_month_purchase)
+            
+            # Determine status
+            if current_month_purchase >= monthly_quota:
+                return "COMPLETED", 0
+            else:
+                return "PENDING", remaining
+                
         except Exception as e:
-            logger.error(f"Error calculating team income: {str(e)}")
-            return 0.00
-
-
-    def safe_get_total_team_members(self, member):
+            logger.error(f"Error checking monthly quota: {str(e)}")
+            return "PENDING", 0
+    
+    def get_total_network_size(self, member):
         """
-        Get total team members recursively
+        Calculate total network size recursively
         """
         try:
-            from home.models import MLMMember
-
-            def count_total_network(current_member):
-                referrals = MLMMember.objects.filter(sponsor=current_member)
-                total = referrals.count()
-                for referral in referrals:
-                    total += count_total_network(referral)
-                return total
-
-            return count_total_network(member)
+            def count_network(current_member):
+                # Count direct downline
+                direct_downline = MLMMember.objects.filter(sponsor=current_member)
+                count = direct_downline.count()
+                
+                # Count indirect downline recursively
+                for downline in direct_downline:
+                    count += count_network(downline)
+                
+                return count
+            
+            return count_network(member)
+            
         except Exception as e:
-            logger.error(f"Error getting total team members: {str(e)}")
+            logger.error(f"Error calculating network size: {str(e)}")
             return 0
-
-
-    def safe_get_monthly_performance(self, member):
+    
+    def get_monthly_performance(self, member):
         """
-        Get monthly performance data
+        Get monthly performance data for the past 6 months
         """
         try:
-            from home.models import Order
-            current_year = timezone.now().year
-            monthly_performance = []
-
-            for month in range(1, 13):
-                start_date = timezone.datetime(current_year, month, 1)
-                end_date = (start_date + timezone.timedelta(days=32)).replace(day=1) - timezone.timedelta(days=1)
-
-                monthly_sales = Order.objects.filter(
+            # Get current date
+            now = timezone.now()
+            
+            # Calculate the past 6 months
+            performance_data = []
+            
+            for i in range(5, -1, -1):
+                month_start = (now - timedelta(days=30*i)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                next_month = (month_start + timedelta(days=32)).replace(day=1)
+                
+                # Get total purchases for this month
+                monthly_purchase = Order.objects.filter(
                     user=member.user,
-                    order_date__range=[start_date, end_date],
-                    status='DELIVERED'
-                ).aggregate(total_sales=Sum('final_amount'))['total_sales'] or Decimal('0.00')
-
-                monthly_performance.append({
-                    'month': start_date.strftime('%b'),
-                    'performance': float(monthly_sales)
+                    order_date__gte=month_start,
+                    order_date__lt=next_month,
+                    status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+                ).aggregate(total=Sum('final_amount'))['total'] or 0
+                
+                performance_data.append({
+                    'month': month_start.strftime('%b'),
+                    'performance': float(monthly_purchase)
                 })
-
-            return monthly_performance
+            
+            return performance_data
+            
         except Exception as e:
-            logger.error(f"Error getting monthly performance: {str(e)}")
+            logger.error(f"Error calculating monthly performance: {str(e)}")
             return []
-
-    def safe_get_featured_products(self):
+    
+    def get_featured_products(self):
         """
         Get featured products
         """
         try:
-            from home.models import Product
-            from django.conf import settings
             featured_products = Product.objects.filter(
-                is_featured=True, 
+                is_featured=True,
                 is_active=True
-            )[:4]  # Top 4 featured products
-
+            )[:4]
+            
             return [{
                 'id': product.id,
                 'name': product.name,
+                'slug': product.slug,
                 'price': float(product.selling_price),
-                'image': product.get_feature_image_url(self.request),
-                'slug': product.slug
+                'image': product.get_feature_image_url(self.request)
             } for product in featured_products]
-            # Use the serializer to generate full URLs
-            # serializer = ProductListSerializer(
-            #     featured_products, 
-            #     many=True, 
-            #     context={'request': self.request}  # Pass request to serializer
-            # )
             
-            # return serializer.data
         except Exception as e:
             logger.error(f"Error getting featured products: {str(e)}")
             return []
-
-    def safe_get_recent_orders(self, member):
+    
+    def get_recent_purchases(self, member):
         """
-        Get recent orders for the member
+        Get user's recent purchases (last 3)
         """
         try:
-            from home.models import Order
+            # Get recent orders first
+            recent_orders = Order.objects.filter(
+                user=member.user,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            ).order_by('-order_date')[:3]
+            
+            # Extract purchased products
+            recent_products = []
+            
+            for order in recent_orders:
+                # Get order items
+                items = OrderItem.objects.filter(order=order).select_related('product')
+                
+                for item in items:
+                    product = item.product
+                    
+                    if product and product.id:
+                        recent_products.append({
+                            'id': product.id,
+                            'name': product.name,
+                            'slug': product.slug,
+                            'price': float(item.final_price),
+                            'image': product.get_feature_image_url(self.request),
+                            'purchase_date': order.order_date.isoformat(),
+                            'quantity': item.quantity
+                        })
+            
+            # Return the last 3 unique products
+            unique_products = []
+            product_ids = set()
+            
+            for product in recent_products:
+                if product['id'] not in product_ids:
+                    product_ids.add(product['id'])
+                    unique_products.append(product)
+                    
+                    if len(unique_products) >= 3:
+                        break
+            
+            return unique_products
+            
+        except Exception as e:
+            logger.error(f"Error getting recent purchases: {str(e)}")
+            return []
+    
+    def get_recent_orders(self, member):
+        """
+        Get user's recent orders (last 5)
+        """
+        try:
             recent_orders = Order.objects.filter(
                 user=member.user
-            ).order_by('-order_date')[:5]  # Last 5 orders
-
+            ).order_by('-order_date')[:5]
+            
             return [{
                 'id': order.id,
                 'order_number': order.order_number,
-                'order_date': order.order_date,
+                'order_date': order.order_date.isoformat(),
                 'status': order.status,
                 'total_amount': float(order.final_amount)
             } for order in recent_orders]
+            
         except Exception as e:
             logger.error(f"Error getting recent orders: {str(e)}")
             return []
