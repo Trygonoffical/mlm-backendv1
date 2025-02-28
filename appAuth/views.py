@@ -47,6 +47,9 @@ from utils.email_utils import send_welcome_email
 from utils.msg91_utils import MSG91Service 
 import string
 from django.core.exceptions import ValidationError
+from .services import QuixGoShippingService
+from home.utils import calculate_monthly_commissions
+from utils.msg91_email_utils import MSG91EmailService
 
 
 logger = logging.getLogger(__name__)
@@ -1762,47 +1765,148 @@ class KYCDocumentViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    # @action(detail=True, methods=['post'])
+    # def verify(self, request, pk=None):
+    #     try:
+    #         if request.user.role != 'ADMIN':
+    #             return Response(
+    #                 {"error": "Only admin can verify documents"}, 
+    #                 status=status.HTTP_403_FORBIDDEN
+    #             )
+    #         document = self.get_object()
+    #         verification_status = request.data.get('status')
+    #         rejection_reason = request.data.get('rejection_reason', '')
+
+    #         if verification_status not in ['VERIFIED', 'REJECTED']:
+    #             return Response(
+    #                 {"error": "Invalid status"},
+    #                 status=status.HTTP_400_BAD_REQUEST
+    #             )
+
+    #         document.status = verification_status
+    #         document.verified_by = request.user
+    #         document.verification_date = timezone.now()
+
+    #         if verification_status == 'REJECTED':
+    #             if not rejection_reason:
+    #                 return Response(
+    #                     {"error": "Rejection reason is required"},
+    #                     status=status.HTTP_400_BAD_REQUEST
+    #                 )
+    #             document.rejection_reason = rejection_reason
+
+    #         document.save()
+            
+    #         # Send notification to MLM member about the verification
+    #         # You can implement this part based on your notification system
+            
+    #         return Response(self.get_serializer(document).data)
+            
+    #     except Exception as e:
+    #         return Response(
+    #             {"error": str(e)},
+    #             status=status.HTTP_400_BAD_REQUEST
+    #         )
+    
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
+        """
+        Verify or reject a KYC document
+        """
         try:
             if request.user.role != 'ADMIN':
                 return Response(
                     {"error": "Only admin can verify documents"}, 
                     status=status.HTTP_403_FORBIDDEN
                 )
+                
             document = self.get_object()
             verification_status = request.data.get('status')
             rejection_reason = request.data.get('rejection_reason', '')
 
             if verification_status not in ['VERIFIED', 'REJECTED']:
                 return Response(
-                    {"error": "Invalid status"},
+                    {"error": "Invalid status. Must be VERIFIED or REJECTED"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            document.status = verification_status
-            document.verified_by = request.user
-            document.verification_date = timezone.now()
-
-            if verification_status == 'REJECTED':
-                if not rejection_reason:
-                    return Response(
-                        {"error": "Rejection reason is required"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                document.rejection_reason = rejection_reason
-
-            document.save()
+            # Use transaction to ensure all operations succeed or fail together
+            with transaction.atomic():
+                # Update document status
+                document.status = verification_status
+                document.verified_by = request.user
+                document.verification_date = timezone.now()
+                
+                if verification_status == 'REJECTED':
+                    if not rejection_reason:
+                        return Response(
+                            {"error": "Rejection reason is required for rejected documents"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    document.rejection_reason = rejection_reason
+                    
+                document.save()
+                
+                # Create notification for the member
+                notification_title = "KYC Document Verified" if verification_status == 'VERIFIED' else "KYC Document Rejected"
+                notification_message = f"Your {document.get_document_type_display()} has been {verification_status.lower()}."
+                
+                if verification_status == 'REJECTED':
+                    notification_message += f" Reason: {rejection_reason}"
+                    
+                Notification.objects.create(
+                    title=notification_title,
+                    message=notification_message,
+                    notification_type='INDIVIDUAL',
+                    recipient=document.mlm_member
+                )
+                
+                # If document is verified, check if all required documents are verified
+                if verification_status == 'VERIFIED':
+                    # Get all KYC documents for the member
+                    all_docs = KYCDocument.objects.filter(mlm_member=document.mlm_member)
+                    required_doc_types = ['AADHAR', 'PAN']  # Define your required document types
+                    
+                    # Check if all required documents are verified
+                    all_verified = True
+                    for doc_type in required_doc_types:
+                        doc_verified = all_docs.filter(
+                            document_type=doc_type, 
+                            status='VERIFIED'
+                        ).exists()
+                        
+                        if not doc_verified:
+                            all_verified = False
+                            break
+                            
+                    # If all documents are verified, send email notification
+                    if all_verified:
+                        logger.info(f"All required documents verified for member {document.mlm_member.member_id}")
+                        
+                        # Send email notification using MSG91
+                        email_service = MSG91EmailService()
+                        email_result = email_service.send_kyc_approved_email(document.mlm_member)
+                        
+                        if not email_result['success']:
+                            logger.warning(f"Failed to send KYC approval email: {email_result['message']}")
+                        
+                        # Create special notification for complete verification
+                        Notification.objects.create(
+                            title="KYC Verification Complete",
+                            message="All your KYC documents have been verified successfully. You can now enjoy full benefits of your membership.",
+                            notification_type='INDIVIDUAL',
+                            recipient=document.mlm_member
+                        )
             
-            # Send notification to MLM member about the verification
-            # You can implement this part based on your notification system
-            
-            return Response(self.get_serializer(document).data)
+            # Return updated document data
+            serializer = self.get_serializer(document)
+            return Response(serializer.data)
             
         except Exception as e:
+            logger.error(f"Error in KYC verification: {str(e)}")
             return Response(
                 {"error": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
@@ -1952,7 +2056,6 @@ class VerifyPaymentView(APIView):
 
     def post(self, request):
         try:
-
             # Log the incoming request data
             logger.info(f"Verify Payment Request Data: {request.data}")
 
@@ -1965,11 +2068,6 @@ class VerifyPaymentView(APIView):
             # Additional logging
             logger.info(f"Payment ID: {payment_id}")
             logger.info(f"Order ID: {order_id}")
-
-            # # Get payment details
-            # payment_id = request.data.get('razorpay_payment_id')
-            # order_id = request.data.get('razorpay_order_id')
-            # signature = request.data.get('razorpay_signature')
 
             # Get the order
             order = Order.objects.get(razorpay_order_id=order_id)
@@ -1989,39 +2087,36 @@ class VerifyPaymentView(APIView):
             try:
                 client.utility.verify_payment_signature(params_dict)
                 
-                # Update order status
-                order.status = 'CONFIRMED'
-                order.payment_id = payment_id
-                order.save()
+                # Use a transaction to ensure consistency
+                with transaction.atomic():
+                    # Update order status
+                    order.status = 'CONFIRMED'
+                    order.payment_id = payment_id
+                    order.save()
 
-                # Send order confirmation SMS
-                send_order_confirmation_sms(order)
+                    # Send order confirmation SMS
+                    send_order_confirmation_sms(order)
 
-                # If user is MLM member, update BP points
-                if request.user.role == 'MLM_MEMBER':
-                    mlm_member = request.user.mlm_profile
-                    mlm_member.total_bp += order.total_bp
-                    mlm_member.current_month_purchase += order.final_amount
-                    # Check for position upgrade
-                    mlm_member.check_position_upgrade()
-                    mlm_member.save()
+                    # Process BP points and check for position upgrades
+                    from home.utils import update_bp_points_on_order
+                    bp_updated = update_bp_points_on_order(order)
+                    
+                    logger.info(f"BP update result for order {order.id}: {bp_updated}")
 
-                    # Check for position upgrade
-                    # mlm_member.check_position_upgrade()
-                # Update product stock if requested
-                if update_stock:
-                    for item in order.items.all():
-                        product = item.product
-                        if product.stock >= item.quantity:
-                            product.stock -= item.quantity
-                            product.save()
-                            logger.info(f"Updated stock for product {product.id}, new stock: {product.stock}")
-                        else:
-                            logger.warning(f"Insufficient stock for product {product.id}: requested {item.quantity}, available {product.stock}")
-                            # We still proceed with the order even if stock is insufficient
-                            # This is to avoid issues with the customer who already paid
-                            product.stock = 0  # Set to zero instead of negative
-                            product.save()
+                    # Update product stock if requested
+                    if update_stock:
+                        for item in order.items.all():
+                            product = item.product
+                            if product.stock >= item.quantity:
+                                product.stock -= item.quantity
+                                product.save()
+                                logger.info(f"Updated stock for product {product.id}, new stock: {product.stock}")
+                            else:
+                                logger.warning(f"Insufficient stock for product {product.id}: requested {item.quantity}, available {product.stock}")
+                                # We still proceed with the order even if stock is insufficient
+                                # This is to avoid issues with the customer who already paid
+                                product.stock = 0  # Set to zero instead of negative
+                                product.save()
 
                 return Response({
                     'status': 'success',
@@ -2034,10 +2129,99 @@ class VerifyPaymentView(APIView):
                 raise e
 
         except Exception as e:
+            logger.error(f"Error in VerifyPaymentView: {str(e)}")
             return Response({
                 'status': 'error',
                 'message': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
+    # def post(self, request):
+    #     try:
+
+    #         # Log the incoming request data
+    #         logger.info(f"Verify Payment Request Data: {request.data}")
+
+    #         # Get payment details
+    #         payment_id = request.data.get('razorpay_payment_id')
+    #         order_id = request.data.get('razorpay_order_id')
+    #         signature = request.data.get('razorpay_signature')
+    #         update_stock = request.data.get('update_stock', False)
+
+    #         # Additional logging
+    #         logger.info(f"Payment ID: {payment_id}")
+    #         logger.info(f"Order ID: {order_id}")
+
+    #         # # Get payment details
+    #         # payment_id = request.data.get('razorpay_payment_id')
+    #         # order_id = request.data.get('razorpay_order_id')
+    #         # signature = request.data.get('razorpay_signature')
+
+    #         # Get the order
+    #         order = Order.objects.get(razorpay_order_id=order_id)
+
+    #         # Initialize Razorpay client
+    #         client = razorpay.Client(
+    #             auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    #         )
+
+    #         # Verify signature
+    #         params_dict = {
+    #             'razorpay_payment_id': payment_id,
+    #             'razorpay_order_id': order_id,
+    #             'razorpay_signature': signature
+    #         }
+            
+    #         try:
+    #             client.utility.verify_payment_signature(params_dict)
+                
+    #             # Update order status
+    #             order.status = 'CONFIRMED'
+    #             order.payment_id = payment_id
+    #             order.save()
+
+    #             # Send order confirmation SMS
+    #             send_order_confirmation_sms(order)
+
+    #             # If user is MLM member, update BP points
+    #             if request.user.role == 'MLM_MEMBER':
+    #                 mlm_member = request.user.mlm_profile
+    #                 mlm_member.total_bp += order.total_bp
+    #                 mlm_member.current_month_purchase += order.final_amount
+    #                 # Check for position upgrade
+    #                 mlm_member.check_position_upgrade()
+    #                 mlm_member.save()
+
+    #                 # Check for position upgrade
+    #                 # mlm_member.check_position_upgrade()
+    #             # Update product stock if requested
+    #             if update_stock:
+    #                 for item in order.items.all():
+    #                     product = item.product
+    #                     if product.stock >= item.quantity:
+    #                         product.stock -= item.quantity
+    #                         product.save()
+    #                         logger.info(f"Updated stock for product {product.id}, new stock: {product.stock}")
+    #                     else:
+    #                         logger.warning(f"Insufficient stock for product {product.id}: requested {item.quantity}, available {product.stock}")
+    #                         # We still proceed with the order even if stock is insufficient
+    #                         # This is to avoid issues with the customer who already paid
+    #                         product.stock = 0  # Set to zero instead of negative
+    #                         product.save()
+
+    #             return Response({
+    #                 'status': 'success',
+    #                 'message': 'Payment verified successfully',
+    #                 'order_id': order.id
+    #             })
+    #         except Exception as e:
+    #             order.status = 'FAILED'
+    #             order.save()
+    #             raise e
+
+    #     except Exception as e:
+    #         return Response({
+    #             'status': 'error',
+    #             'message': str(e)
+    #         }, status=status.HTTP_400_BAD_REQUEST)
         
     def send_order_confirmation_sms(self, order):
         """Send order confirmation SMS using MSG91"""
@@ -6987,3 +7171,289 @@ class MLMMemberReportsView(APIView):
         elif period_type == 'yearly':
             return str(period.year)
         return str(period)
+
+
+class LiveCommissionDashboardView(APIView):
+    """
+    API endpoint to show real-time commission calculations and forecasts 
+    for MLM members based on current month performance
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            # Ensure the user is an MLM member
+            if request.user.role != 'MLM_MEMBER':
+                return Response({
+                    'status': False,
+                    'message': 'Only MLM members can access this dashboard'
+                }, status=status.HTTP_403_FORBIDDEN)
+                
+            # Get the MLM member profile
+            member = request.user.mlm_profile
+            
+            # Check if the member has an active position that can earn commissions
+            if not member.position.can_earn_commission:
+                return Response({
+                    'status': False,
+                    'message': 'Your current position cannot earn commissions. Please upgrade to a higher position.'
+                }, status=status.HTTP_403_FORBIDDEN)
+                
+            # Import the function to get live commission data
+            from home.utils import get_live_commission_data
+            
+            # Get commission data
+            commission_data = get_live_commission_data(member)
+            
+            # Get current month and calculation dates
+            today = timezone.now()
+            current_month = today.strftime('%B %Y')
+            
+            # Determine next commission calculation date
+            first_day_next_month = (today.replace(day=28) + timezone.timedelta(days=4)).replace(day=1)
+            next_calculation_date = first_day_next_month.strftime('%d %B %Y')
+            
+            # Determine next withdrawal availability date
+            if today.day < 15:
+                # If we're before the 15th, next withdrawal is on the 15th
+                next_withdrawal_date = today.replace(day=15).strftime('%d %B %Y')
+            else:
+                # If we're on or after the 15th, next withdrawal is on the 15th of next month
+                next_withdrawal_date = first_day_next_month.replace(day=15).strftime('%d %B %Y')
+                
+            # Add additional info to the response
+            response_data = {
+                'status': True,
+                'current_month': current_month,
+                'next_calculation_date': next_calculation_date,
+                'next_withdrawal_date': next_withdrawal_date,
+                'commission_data': commission_data
+            }
+            
+            return Response(response_data)
+            
+        except Exception as e:
+            logger.error(f"Error in LiveCommissionDashboardView: {str(e)}")
+            return Response({
+                'status': False,
+                'message': 'An error occurred while loading the commission dashboard',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class CommissionHistoryView(APIView):
+    """
+    API endpoint to view commission history for MLM members
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            # Ensure the user is an MLM member
+            if request.user.role != 'MLM_MEMBER' and request.user.role != 'ADMIN':
+                return Response({
+                    'status': False,
+                    'message': 'Only MLM members and admins can access commission history'
+                }, status=status.HTTP_403_FORBIDDEN)
+                
+            # Get query parameters
+            year = request.query_params.get('year')
+            month = request.query_params.get('month')
+            member_id = request.query_params.get('member_id')
+            
+            # Parse year and month if provided
+            if year:
+                try:
+                    year = int(year)
+                except ValueError:
+                    return Response({
+                        'status': False,
+                        'message': 'Invalid year format'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if month:
+                try:
+                    month = int(month)
+                    if month < 1 or month > 12:
+                        raise ValueError("Month must be between 1 and 12")
+                except ValueError as e:
+                    return Response({
+                        'status': False,
+                        'message': str(e)
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Determine which member's commissions to show
+            target_member = None
+            
+            if request.user.role == 'MLM_MEMBER':
+                # Regular members can only see their own commissions
+                target_member = request.user.mlm_profile
+            else:
+                # Admins can see any member's commissions
+                if member_id:
+                    try:
+                        target_member = MLMMember.objects.get(member_id=member_id)
+                    except MLMMember.DoesNotExist:
+                        return Response({
+                            'status': False,
+                            'message': 'Member not found'
+                        }, status=status.HTTP_404_NOT_FOUND)
+                else:
+                    return Response({
+                        'status': False,
+                        'message': 'member_id is required for admin users'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get commission history
+            queryset = Commission.objects.filter(member=target_member)
+            
+            # Apply year and month filters if provided
+            if year and month:
+                # Filter for specific month
+                start_date = datetime(year, month, 1)
+                if month == 12:
+                    end_date = datetime(year + 1, 1, 1)
+                else:
+                    end_date = datetime(year, month + 1, 1)
+                
+                queryset = queryset.filter(date__gte=start_date, date__lt=end_date)
+            elif year:
+                # Filter for entire year
+                start_date = datetime(year, 1, 1)
+                end_date = datetime(year + 1, 1, 1)
+                queryset = queryset.filter(date__gte=start_date, date__lt=end_date)
+            
+            # Get summary statistics
+            summary = {
+                'total_earned': Decimal('0.00'),
+                'total_paid': Decimal('0.00'),
+                'total_pending': Decimal('0.00')
+            }
+            
+            summary_data = queryset.aggregate(
+                total_earned=Sum('amount'),
+                total_paid=Sum('amount', filter=Q(is_paid=True)),
+                total_pending=Sum('amount', filter=Q(is_paid=False))
+            )
+            
+            if summary_data['total_earned']:
+                summary['total_earned'] = summary_data['total_earned']
+            if summary_data['total_paid']:
+                summary['total_paid'] = summary_data['total_paid']
+            if summary_data['total_pending']:
+                summary['total_pending'] = summary_data['total_pending']
+            
+            # Get detailed commission records
+            commissions = queryset.select_related('from_member', 'from_member__user').order_by('-date')
+            
+            # Paginate results if needed
+            page = int(request.query_params.get('page', 1))
+            page_size = int(request.query_params.get('page_size', 20))
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            
+            # Prepare response data
+            commission_data = []
+            
+            for commission in commissions[start_idx:end_idx]:
+                from_member_name = f"{commission.from_member.user.first_name} {commission.from_member.user.last_name}"
+                if not from_member_name.strip():
+                    from_member_name = commission.from_member.member_id
+                
+                commission_data.append({
+                    'id': commission.id,
+                    'date': commission.date,
+                    'amount': float(commission.amount),
+                    'is_paid': commission.is_paid,
+                    'payment_date': commission.payment_date,
+                    'from_member': {
+                        'member_id': commission.from_member.member_id,
+                        'name': from_member_name
+                    },
+                    'commission_type': commission.commission_type if hasattr(commission, 'commission_type') else 'MONTHLY',
+                    'level': commission.level,
+                    'is_first_purchase_bonus': commission.is_first_purchase_bonus
+                })
+            
+            response_data = {
+                'status': True,
+                'summary': {
+                    'total_earned': float(summary['total_earned']),
+                    'total_paid': float(summary['total_paid']),
+                    'total_pending': float(summary['total_pending'])
+                },
+                'pagination': {
+                    'page': page,
+                    'page_size': page_size,
+                    'total_records': commissions.count(),
+                    'total_pages': (commissions.count() + page_size - 1) // page_size
+                },
+                'commissions': commission_data
+            }
+            
+            return Response(response_data)
+            
+        except Exception as e:
+            logger.error(f"Error in CommissionHistoryView: {str(e)}")
+            return Response({
+                'status': False,
+                'message': 'An error occurred while retrieving commission history',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class CalculateCommissionsView(APIView):
+    """
+    API endpoint for admin to manually trigger commission calculations
+    """
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAdminUser]
+    
+    def post(self, request):
+        try:
+            # Check if this is a forced calculation (override date check)
+            force = request.data.get('force', False)
+            
+            # Get the target date for calculation (default to today)
+            calculation_date_str = request.data.get('calculation_date')
+            if calculation_date_str:
+                try:
+                    calculation_date = datetime.strptime(calculation_date_str, '%Y-%m-%d')
+                except ValueError:
+                    return Response({
+                        'status': False,
+                        'message': 'Invalid date format. Use YYYY-MM-DD'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                calculation_date = timezone.now()
+            
+            # Only allow calculation on the 1st of the month unless forced
+            if not force and calculation_date.day != 1:
+                return Response({
+                    'status': False,
+                    'message': f'Commission calculations should only be run on the 1st of the month. Today is the {calculation_date.day}rd. Use "force=true" to override.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Run the calculation
+            result = calculate_monthly_commissions()
+            
+            if result:
+                return Response({
+                    'status': True,
+                    'message': 'Monthly commission calculation completed successfully'
+                })
+            else:
+                return Response({
+                    'status': False,
+                    'message': 'Monthly commission calculation failed or was skipped'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except Exception as e:
+            logger.error(f"Error in CalculateCommissionsView: {str(e)}")
+            return Response({
+                'status': False,
+                'message': 'An error occurred while calculating commissions',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

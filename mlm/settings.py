@@ -227,6 +227,19 @@ QUIXGO_EMAIL = 'your-email@example.com'  # Replace with your QuixGo account emai
 QUIXGO_PASSWORD = 'your-password'  # Replace with your QuixGo account password
 QUIXGO_CUSTOMER_ID = 'your-customer-id'  # This will be obtained after the first login
 
+
+MSG91_EMAIL_AUTH_KEY = '440929ANN27nHYNBZ67badd81P1'
+MSG91_EMAIL_SENDER = 'noreply@mail.herbalpowerindia.com'
+MSG91_EMAIL_SENDER_NAME = 'Herbal Power Marketing Private Limited'
+MSG91_EMAIL_DOMAIN = 'mail.herbalpowerindia.com'
+
+# Email templates
+MSG91_EMAIL_TEMPLATES = {
+    'KYC_APPROVED': 'kyc_approved_3',
+    # Add other templates as needed
+}
+
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

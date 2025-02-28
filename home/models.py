@@ -9,7 +9,7 @@ from django.core.validators import EmailValidator, MinValueValidator, MaxValueVa
 from django.utils import timezone
 from decimal import Decimal
 from django.core.validators import RegexValidator
-from django.utils import timezone
+
 from datetime import timedelta
 from django.core.exceptions import ValidationError
 from django.db.models import Q, Max, F
@@ -17,6 +17,9 @@ from django.core.validators import MinLengthValidator
 from django.db.models.signals import post_save
 from django.dispatch import receiver 
 import logging
+from django.db.models import Sum,  Q
+from django.dispatch import receiver
+
 
 logger = logging.getLogger(__name__)
 
@@ -555,10 +558,90 @@ class Commission(models.Model):
         default=False, 
         help_text="Flag to indicate if this is a first purchase bonus commission"
     )
+
+    # Type of commission
+    COMMISSION_TYPES = (
+        ('ORDER', 'Order Commission'),
+        ('MONTHLY', 'Monthly Calculation'),
+        ('BONUS', 'First Purchase Bonus'),
+        ('SPECIAL', 'Special Promotion')
+    )
+    commission_type = models.CharField(max_length=10, choices=COMMISSION_TYPES, default='MONTHLY')
+    
+    # Details about the commission (JSON)
+    details = models.JSONField(default=dict, blank=True)
+    
+    # For monthly calculations, track the month this represents
+    calculation_month = models.DateField(null=True, blank=True, 
+        help_text="For monthly calculations, the first day of the month this calculation represents")
+    
     class Meta:
         db_table = 'commissions'
         ordering = ['-date']
+        indexes = [
+            models.Index(fields=['member', 'date']),
+            models.Index(fields=['from_member', 'date']),
+            models.Index(fields=['calculation_month']),
+        ]
+    def __str__(self):
+        return f"Commission {self.id}: {self.amount} to {self.member.member_id} from {self.from_member.member_id}"
+    
+    def save(self, *args, **kwargs):
+        # If this is a monthly calculation, set the calculation_month
+        if self.commission_type == 'MONTHLY' and not self.calculation_month:
+            # Set to the first day of the current month
+            today = timezone.now()
+            self.calculation_month = today.replace(day=1).date()
+            
+        # Add details if they don't exist
+        if not self.details:
+            self.details = {
+                'member_position': self.member.position.name,
+                'member_percentage': float(self.member.position.discount_percentage),
+                'from_member_position': self.from_member.position.name,
+                'from_member_percentage': float(self.from_member.position.discount_percentage),
+                'difference_percentage': float(self.member.position.discount_percentage - self.from_member.position.discount_percentage)
+            }
+            
+        super().save(*args, **kwargs)
+        
+        # If this is being marked as paid, update member's total earnings
+        if self.is_paid and self.payment_date is None:
+            self.payment_date = timezone.now()
+            self.member.total_earnings += self.amount
+            self.member.save(update_fields=['total_earnings'])
 
+    @classmethod
+    def get_monthly_earnings(cls, member, year=None, month=None):
+        """
+        Get monthly earnings for a specific member
+        If year and month are not provided, returns data for all months
+        """
+        from django.db.models.functions import TruncMonth
+        
+        # Base queryset
+        queryset = cls.objects.filter(member=member)
+        
+        # Filter by year and month if provided
+        if year and month:
+            start_date = timezone.datetime(year, month, 1)
+            if month == 12:
+                end_date = timezone.datetime(year+1, 1, 1)
+            else:
+                end_date = timezone.datetime(year, month+1, 1)
+                
+            queryset = queryset.filter(date__gte=start_date, date__lt=end_date)
+        
+        # Aggregate by month
+        monthly_data = queryset.annotate(
+            month=TruncMonth('date')
+        ).values('month').annotate(
+            total=Sum('amount'),
+            paid=Sum('amount', filter=Q(is_paid=True)),
+            pending=Sum('amount', filter=Q(is_paid=False))
+        ).order_by('month')
+        
+        return monthly_data
     @classmethod
     def calculate_commissions(cls, order):
         """
