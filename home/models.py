@@ -339,6 +339,8 @@ class Order(models.Model):
     class Meta:
         db_table = 'orders'
 
+    
+        
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
@@ -397,11 +399,25 @@ class MLMMember(models.Model):
     total_earnings = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     created_at = models.DateTimeField(default=timezone.now ) 
     updated_at = models.DateTimeField(default=timezone.now ) 
+
     # Add this to your existing MLMMember model
     first_purchase_bonus_received = models.BooleanField(
         default=False, 
         help_text="Flag to track if first purchase bonus has been received"
     )
+
+    first_payment_complete = models.BooleanField(
+        default=False, 
+        help_text="Flag to track if first payment requirement has been met"
+    )
+
+    first_payment_amount = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=0, 
+        help_text="Amount of first payment made by member"
+    )
+
     class Meta:
         db_table = 'mlm_members'
 

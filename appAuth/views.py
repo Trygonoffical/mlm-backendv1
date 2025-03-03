@@ -2103,6 +2103,12 @@ class VerifyPaymentView(APIView):
                     
                     logger.info(f"BP update result for order {order.id}: {bp_updated}")
 
+                    # Process first payment bonus if applicable
+                    from home.utils import process_first_payment
+                    first_payment_processed = process_first_payment(order)
+                    if first_payment_processed:
+                        logger.info(f"First payment bonus processed for order {order.id}")
+
                     # Update product stock if requested
                     if update_stock:
                         for item in order.items.all():
@@ -4966,17 +4972,35 @@ class MLMMemberRegistrationView(APIView):
             # Get current MLM member (sponsor)
             current_member = MLMMember.objects.get(user=request.user)
             
+            # # Get current member's position level
+            # current_level = current_member.position.level_order if current_member.position else 0
+            
+            # # Members can only create members up to level 2
+            # if current_level > 2:
+            #     # Limit to creating only level 1 or 2 members
+            #     max_creation_level = 2
+            # else:
+            #     # Can only create members of lower level than themselves
+            #     max_creation_level = current_level - 1
+                
+            # if max_creation_level < 1:
+            #     return Response({
+            #         'error': 'You do not have permission to register new members with your current position'
+            #     }, status=status.HTTP_403_FORBIDDEN)
             # Get current member's position level
             current_level = current_member.position.level_order if current_member.position else 0
-            
-            # Members can only create members up to level 2
-            if current_level > 2:
-                # Limit to creating only level 1 or 2 members
+
+            # Determine which levels this member can create
+            if current_level >= 3:
+                # Level 3+ can create both Level 1 and 2
                 max_creation_level = 2
+            elif current_level == 2:
+                # Level 2 can only create Level 1
+                max_creation_level = 1
             else:
-                # Can only create members of lower level than themselves
-                max_creation_level = current_level - 1
-                
+                # Level 1 can't create any members
+                max_creation_level = 0
+
             if max_creation_level < 1:
                 return Response({
                     'error': 'You do not have permission to register new members with your current position'
@@ -5024,7 +5048,8 @@ class MLMMemberRegistrationView(APIView):
                     user=new_user,
                     sponsor=current_member,
                     position=position,
-                    is_active=True
+                    is_active=True,
+                    first_payment_complete=False
                 )
 
                 # Process KYC Documents
@@ -5059,17 +5084,32 @@ class MLMMemberRegistrationView(APIView):
                         raise ValueError(f"Failed to process document: {str(doc_error)}")
                     
                 # Send welcome email if email is provided
-                if new_user.email:
-                    try:
-                        # Pass the plain text password only for email purposes
-                        send_welcome_email(new_user, password, current_member)
-                    except Exception as email_error:
-                        logger.error(f"Error sending welcome email: {str(email_error)}")
+                # if new_user.email:
+                #     try:
+                #         # Pass the plain text password only for email purposes
+                #         send_welcome_email(new_user, password, current_member)
+                #     except Exception as email_error:
+                #         logger.error(f"Error sending welcome email: {str(email_error)}")
                         # Don't fail the registration if email fails
                         # You might want to log this or set a flag to retry later
 
                 # Create notification about new member registration if needed
                 # Notification.objects.create(...)
+                # Create notification about new member registration and first payment requirement
+                Notification.objects.create(
+                    title='New Member Registration',
+                    message=f"You've been registered as a new MLM member. Please complete your first payment of at least ₹{position.monthly_quota} to activate your account.",
+                    notification_type='INDIVIDUAL',
+                    recipient=new_mlm_member
+                )
+
+                # Create notification for sponsor
+                Notification.objects.create(
+                    title='New Downline Member',
+                    message=f"You've successfully registered {new_user.get_full_name()} as your downline. You'll receive a ₹1000 bonus when they complete their first payment.",
+                    notification_type='INDIVIDUAL',
+                    recipient=current_member
+                )
 
                 return Response({
                     'status': 'success',
@@ -5082,7 +5122,8 @@ class MLMMemberRegistrationView(APIView):
                         'phone': new_user.phone_number,
                         'sponsor': current_member.member_id,
                         'position': position.name,
-                        'level': position.level_order
+                        'level': position.level_order,
+                        'first_payment_required': float(position.monthly_quota)
                     }
                 })
 

@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.utils import timezone
 from datetime import datetime, timedelta
 import logging
+from home.models import Commission, Notification, MLMMember
 
 logger = logging.getLogger(__name__)
 
@@ -291,3 +292,89 @@ def get_live_commission_data(member):
             'pending_withdrawals': 0,
             'downline_performance': []
         }
+    
+
+
+def process_first_payment(order):
+    """
+    Process first payment for a new MLM member.
+    Checks if the payment meets the monthly quota requirement and
+    awards a 1000 rupee bonus to the sponsor if requirements are met.
+    
+    Args:
+        order (Order): The completed order
+    
+    Returns:
+        bool: Whether first payment was processed successfully
+    """
+    try:
+        # Get the member who made the order
+        user = order.user
+        
+        # Check if user is an MLM member
+        if not hasattr(user, 'mlm_profile'):
+            logger.info(f"User {user.id} is not an MLM member, skipping first payment processing")
+            return False
+            
+        member = user.mlm_profile
+        
+        # Check if first payment is already processed
+        if member.first_payment_complete:
+            logger.info(f"First payment already processed for member {member.member_id}, skipping")
+            return False
+            
+        # Get the monthly quota requirement from position
+        monthly_quota = member.position.monthly_quota
+        
+        # Check if order amount meets the requirement
+        if order.final_amount >= monthly_quota:
+            # Mark first payment as complete
+            member.first_payment_complete = True
+            member.first_payment_amount = order.final_amount
+            member.save(update_fields=['first_payment_complete', 'first_payment_amount'])
+            
+            logger.info(f"First payment completed for member {member.member_id}: {order.final_amount} ≥ {monthly_quota}")
+            
+            # Check if member has a sponsor to award bonus
+            if member.sponsor:
+                # Create a bonus commission of 1000 rupees for the sponsor
+                
+                logger.info(f"Creating 1000 rupee bonus for sponsor {member.sponsor.member_id}")
+                
+                Commission.objects.create(
+                    member=member.sponsor,
+                    from_member=member,
+                    order=order,
+                    amount=Decimal('1000.00'),  # 1000 rupees bonus
+                    level=1,  # Direct sponsor
+                    is_paid=True,  # Mark as paid immediately
+                    payment_date=timezone.now(),
+                    commission_type='BONUS',
+                    details={
+                        'bonus_type': 'first_payment',
+                        'payment_amount': float(order.final_amount),
+                        'quota_requirement': float(monthly_quota)
+                    }
+                )
+                
+                # Update sponsor's total earnings
+                member.sponsor.total_earnings += Decimal('1000.00')
+                member.sponsor.save(update_fields=['total_earnings'])
+                
+                # Create notification for sponsor
+                Notification.objects.create(
+                    title='First Payment Bonus',
+                    message=f'You have received a bonus of ₹1000 for {member.user.get_full_name()}\'s first payment.',
+                    notification_type='COMMISSION',
+                    recipient=member.sponsor
+                )
+                
+            return True
+        else:
+            logger.info(f"Payment amount {order.final_amount} does not meet quota {monthly_quota} for first payment")
+            
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error processing first payment bonus: {str(e)}")
+        return False
