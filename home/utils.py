@@ -27,6 +27,10 @@ def update_bp_points_on_order(order):
         logger.info(f"Processing BP update for member {member.member_id} from order {order.id}")
         
         with transaction.atomic():
+
+            if hasattr(order, 'bp_processed') and order.bp_processed:
+                logger.info(f"Order {order.id} already processed for BP, skipping")
+                return False
             # Add BP points from order to member
             old_bp = member.total_bp
             member.total_bp += order.total_bp
@@ -34,6 +38,10 @@ def update_bp_points_on_order(order):
             # Update monthly purchase amount
             member.current_month_purchase += order.final_amount
             member.save()
+            
+            # Mark order as processed for BP
+            order.bp_processed = True
+            order.save(update_fields=['bp_processed'])
             
             logger.info(f"Updated BP for {member.member_id}: {old_bp} → {member.total_bp}")
             

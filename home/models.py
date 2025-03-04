@@ -335,7 +335,7 @@ class Order(models.Model):
     razorpay_order_id = models.CharField(max_length=100, null=True, blank=True)
     payment_id = models.CharField(max_length=100, null=True, blank=True)
     discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-
+    bp_processed = models.BooleanField(default=False, help_text="Flag to track if BP has been processed for this order")
     class Meta:
         db_table = 'orders'
 
@@ -685,6 +685,8 @@ class Commission(models.Model):
         default=False, 
         help_text="Flag to indicate if this is a first purchase bonus commission"
     )
+    is_reversed = models.BooleanField(default=False)
+    reversed_at = models.DateTimeField(null=True, blank=True)
 
     # Type of commission
     COMMISSION_TYPES = (

@@ -3191,6 +3191,42 @@ class NotificationViewSet(viewsets.ModelViewSet):
                 {"error": "Failed to get unread count"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+        
+    @action(detail=False, methods=['POST'])
+    def mark_all_read(self, request):
+        try:
+            user = request.user
+            
+            # If user is MLM member, get their profile
+            if hasattr(user, 'mlm_profile'):
+                mlm_member = user.mlm_profile
+                notifications = Notification.objects.filter(
+                    Q(recipient=mlm_member) | Q(notification_type='GENERAL', recipient__isnull=True),
+                    is_read=False
+                )
+            else:
+                # For non-MLM members, only mark general notifications
+                notifications = Notification.objects.filter(
+                    notification_type='GENERAL',
+                    recipient__isnull=True,
+                    is_read=False
+                )
+                
+            # Update all notifications
+            count = notifications.count()
+            notifications.update(is_read=True, read_at=timezone.now())
+            
+            return Response({
+                "status": "success", 
+                "message": f"{count} notifications marked as read"
+            })
+            
+        except Exception as e:
+            logger.error(f"Error marking all notifications as read: {str(e)}")
+            return Response(
+                {"error": "Failed to mark all notifications as read"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 #------------------ admin / member orders ---------------
 
@@ -3248,7 +3284,9 @@ class UpdateOrderStatusView(APIView):
             
             # Get the new status from request
             new_status = request.data.get('status')
-            
+            old_status = order.status
+
+
             # Validate status
             valid_statuses = [choice[0] for choice in Order.OrderStatus.choices]
             if new_status not in valid_statuses:
@@ -3256,6 +3294,17 @@ class UpdateOrderStatusView(APIView):
                     {'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+            # If transitioning to CANCELLED and previously was CONFIRMED/SHIPPED/DELIVERED
+            # We need to reverse BP and commissions
+            if new_status == 'CANCELLED' and old_status in ['CONFIRMED', 'SHIPPED', 'DELIVERED']:
+                try:
+                    self.reverse_bp_and_commissions(order)
+                except Exception as reverse_error:
+                    logger.error(f"Error reversing BP and commissions: {reverse_error}")
+                    return Response(
+                        {'error': 'Failed to reverse BP and commissions for canceled order'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
             
             # Update status
             order.status = new_status
@@ -3284,6 +3333,63 @@ class UpdateOrderStatusView(APIView):
                 {'error': 'An unexpected error occurred'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    def reverse_bp_and_commissions(self, order):
+        """
+        Reverse BP points and commissions for a canceled order
+        """
+        with transaction.atomic():
+            # 1. Reverse BP points if the user is an MLM member
+            user = order.user
+            if hasattr(user, 'mlm_profile'):
+                mlm_member = user.mlm_profile
+                # Subtract BP points that were added from this order
+                if order.total_bp > 0:
+                    mlm_member.total_bp = F('total_bp') - order.total_bp
+                    
+                    # Subtract from monthly purchase amount if needed
+                    mlm_member.current_month_purchase = F('current_month_purchase') - order.final_amount
+                    
+                    mlm_member.save()
+                    
+                    # Log the BP point reversal
+                    logger.info(f"Reversed {order.total_bp} BP points for member {mlm_member.member_id} due to order cancellation")
+            
+            # 2. Find and reverse any commissions generated from this order
+            commissions = Commission.objects.filter(order=order)
+            
+            # For each commission record
+            for commission in commissions:
+                # If commission was paid, subtract from recipient's total earnings
+                if commission.is_paid:
+                    commission.member.total_earnings = F('total_earnings') - commission.amount
+                    commission.member.save()
+                    
+                    # Log the commission reversal
+                    logger.info(f"Reversed paid commission of {commission.amount} for member {commission.member.member_id}")
+                
+                # Delete or mark the commission as reversed
+                # Option 1: Delete the commission record
+                # commission.delete()
+                
+                # Option 2: Mark as reversed (preferred for audit trail)
+                commission.is_reversed = True  # You'll need to add this field to your Commission model
+                commission.reversed_at = timezone.now()
+                commission.save()
+            
+            # If this was a first purchase bonus that triggered first_purchase_bonus_received
+            # Check if this was the first confirmed order and reset the flag if needed
+            if user.mlm_profile.first_purchase_bonus_received:
+                # Check if this was the only confirmed order
+                other_orders = Order.objects.filter(
+                    user=user,
+                    status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+                ).exclude(id=order.id).exists()
+                
+                if not other_orders:
+                    # This was the only confirmed order, reset the flag
+                    user.mlm_profile.first_purchase_bonus_received = False
+                    user.mlm_profile.save()
+                    logger.info(f"Reset first_purchase_bonus_received flag for member {user.mlm_profile.member_id}")
 
 class MLMOrderListView(APIView):
     permission_classes = [IsAuthenticated]

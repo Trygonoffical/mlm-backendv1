@@ -818,81 +818,7 @@ class BankDetailsSerializerNew(serializers.ModelSerializer):
         return value.strip()
     
 
-class MLMMemberListSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-    position = PositionSerializer(read_only=True)
-    sponsor = MLMMemberBasicSerializer(read_only=True)
-    monthly_earnings = serializers.SerializerMethodField()
-    recent_commissions = serializers.SerializerMethodField()
-    withdrawals = serializers.SerializerMethodField()
-    pending_payouts = serializers.SerializerMethodField()
-    bank_details = BankDetailsSerializerNew(read_only=True)
-    class Meta:
-        model = MLMMember
-        fields = [
-            'id', 'member_id', 'user', 'position', 'sponsor',
-            'total_bp', 'current_month_purchase', 'is_active',
-            'join_date', 'total_earnings', 'monthly_earnings',
-            'recent_commissions', 'withdrawals', 'pending_payouts' ,'bank_details'
-        ]
 
-    def get_monthly_earnings(self, obj):
-        monthly = Commission.objects.filter(
-            member=obj
-        ).annotate(
-            month=TruncMonth('date')
-        ).values('month').annotate(
-            amount=Sum('amount')
-        ).order_by('month')
-
-        return [
-            {
-                'month': entry['month'].strftime('%b %Y'),
-                'amount': float(entry['amount'])
-            }
-            for entry in monthly
-        ]
-
-    def get_recent_commissions(self, obj):
-        commissions = Commission.objects.filter(
-            member=obj
-        ).select_related('from_member__user').order_by('-date')[:10]
-
-        return [
-            {
-                'date': commission.date,
-                'amount': float(commission.amount),
-                'from_member_name': commission.from_member.user.get_full_name(),
-                'is_paid': commission.is_paid
-            }
-            for commission in commissions
-        ]
-
-    def get_withdrawals(self, obj):
-        withdrawals = WalletTransaction.objects.filter(
-            wallet__user=obj.user,
-            transaction_type='WITHDRAWAL'
-        ).order_by('-created_at')
-
-        return [
-            {
-                'date': withdrawal.created_at,
-                'amount': float(withdrawal.amount),
-                'status': withdrawal.status
-            }
-            for withdrawal in withdrawals
-        ]
-
-    def get_pending_payouts(self, obj):
-        return float(
-            Commission.objects.filter(
-                member=obj,
-                is_paid=False
-            ).aggregate(
-                total=Sum('amount')
-            )['total'] or 0
-        )
-    
     
 
 
@@ -1339,7 +1265,82 @@ class KYCDocumentSerializer(serializers.ModelSerializer):
     
 
 
+class MLMMemberListSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+    position = PositionSerializer(read_only=True)
+    sponsor = MLMMemberBasicSerializer(read_only=True)
+    monthly_earnings = serializers.SerializerMethodField()
+    recent_commissions = serializers.SerializerMethodField()
+    withdrawals = serializers.SerializerMethodField()
+    pending_payouts = serializers.SerializerMethodField()
+    bank_details = BankDetailsSerializerNew(read_only=True)
+    kyc_documents = KYCDocumentSerializer(many=True, read_only=True, source='kyc_documents.all')
+    class Meta:
+        model = MLMMember
+        fields = [
+            'id', 'member_id', 'user', 'position', 'sponsor',
+            'total_bp', 'current_month_purchase', 'is_active',
+            'join_date', 'total_earnings', 'monthly_earnings',
+            'recent_commissions', 'withdrawals', 'pending_payouts' ,'bank_details' , 'kyc_documents'
+        ]
 
+    def get_monthly_earnings(self, obj):
+        monthly = Commission.objects.filter(
+            member=obj
+        ).annotate(
+            month=TruncMonth('date')
+        ).values('month').annotate(
+            amount=Sum('amount')
+        ).order_by('month')
+
+        return [
+            {
+                'month': entry['month'].strftime('%b %Y'),
+                'amount': float(entry['amount'])
+            }
+            for entry in monthly
+        ]
+
+    def get_recent_commissions(self, obj):
+        commissions = Commission.objects.filter(
+            member=obj
+        ).select_related('from_member__user').order_by('-date')[:10]
+
+        return [
+            {
+                'date': commission.date,
+                'amount': float(commission.amount),
+                'from_member_name': commission.from_member.user.get_full_name(),
+                'is_paid': commission.is_paid
+            }
+            for commission in commissions
+        ]
+
+    def get_withdrawals(self, obj):
+        withdrawals = WalletTransaction.objects.filter(
+            wallet__user=obj.user,
+            transaction_type='WITHDRAWAL'
+        ).order_by('-created_at')
+
+        return [
+            {
+                'date': withdrawal.created_at,
+                'amount': float(withdrawal.amount),
+                'status': withdrawal.status
+            }
+            for withdrawal in withdrawals
+        ]
+
+    def get_pending_payouts(self, obj):
+        return float(
+            Commission.objects.filter(
+                member=obj,
+                is_paid=False
+            ).aggregate(
+                total=Sum('amount')
+            )['total'] or 0
+        )
+    
 
 class BlogSerializer(serializers.ModelSerializer):
     feature_image_url = serializers.SerializerMethodField()
