@@ -6156,6 +6156,33 @@ class MLMLiveCommissionView(APIView):
         except Exception as e:
             logger.error(f"Error getting recent transactions: {str(e)}")
             return []
+        
+    def get_monthly_quota_status(self, member):
+        """
+        Check monthly quota status
+        """
+        try:
+            # Get position
+            position = member.position
+            
+            # Get current month purchases
+            current_month_purchase = float(member.current_month_purchase or 0)
+            
+            # Get required monthly quota
+            monthly_quota = float(position.monthly_quota)
+            
+            # Calculate remaining amount
+            remaining = max(0, monthly_quota - current_month_purchase)
+            
+            # Determine status
+            if current_month_purchase >= monthly_quota:
+                return "COMPLETED", 0
+            else:
+                return "PENDING", remaining
+                
+        except Exception as e:
+            logger.error(f"Error checking monthly quota: {str(e)}")
+            return "PENDING", 0
 
 
 class AdminCustomerViewSet(viewsets.ReadOnlyModelViewSet):
