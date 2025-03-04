@@ -2592,15 +2592,15 @@ class OrderProcessView(APIView):
                 )
 
             # Update MLM member data if applicable
-            if request.user.role == 'MLM_MEMBER':
-                mlm_member = request.user.mlm_profile
-                mlm_member.total_bp += total_bp_points
-                mlm_member.current_month_purchase += final_total
-                mlm_member.save()
+            # if request.user.role == 'MLM_MEMBER':
+            #     mlm_member = request.user.mlm_profile
+            #     mlm_member.total_bp += total_bp_points
+            #     mlm_member.current_month_purchase += final_total
+            #     mlm_member.save()
                 
-                # Check for position upgrade
-                # mlm_member.check_position_upgrade()
-                self.check_position_upgrade(mlm_member)
+            #     # Check for position upgrade
+            #     # mlm_member.check_position_upgrade()
+            #     self.check_position_upgrade(mlm_member)
 
             # Create Razorpay order
             client = razorpay.Client(
