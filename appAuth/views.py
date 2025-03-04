@@ -7731,6 +7731,9 @@ class LiveCommissionDashboardView(APIView):
     
     def get(self, request):
         try:
+
+            logger.info(f"User: {request.user.username}, Role: {request.user.role}")
+            logger.info(f"Has MLM profile: {hasattr(request.user, 'mlm_profile')}")
             # Check if a specific member_id is requested (for admin users)
             member_id = request.query_params.get('member_id')
             
@@ -8093,7 +8096,7 @@ class LiveCommissionDashboardView(APIView):
             
         except Exception as e:
             logger.error(f"Error getting recent transactions: {str(e)}")
-            return []        
+            return []           
 
 class CommissionHistoryView(APIView):
     """
