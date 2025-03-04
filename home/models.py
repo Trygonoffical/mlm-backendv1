@@ -418,6 +418,17 @@ class MLMMember(models.Model):
         help_text="Amount of first payment made by member"
     )
 
+    # Additional commission tracking fields
+    monthly_quota_maintained = models.BooleanField(
+        default=False,
+        help_text="Flag indicating if monthly quota is maintained for current month"
+    )
+    last_commission_calculation = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="Date of last commission calculation"
+    )
+
     class Meta:
         db_table = 'mlm_members'
 
@@ -447,7 +458,16 @@ class MLMMember(models.Model):
         if higher_position:
             self.position = higher_position
             self.save()
+
+            # Create a notification about position upgrade
+            Notification.objects.create(
+                title='Position Upgraded',
+                message=f'Congratulations! Your position has been upgraded to {higher_position.name}.',
+                notification_type='SYSTEM',
+                recipient=self
+            )
             return True
+
         return False
     
     def toggle_status(self):
@@ -490,7 +510,98 @@ class MLMMember(models.Model):
         )['total_purchase'] or Decimal('0.00')
         
         # Compare with position's monthly quota
-        return total_monthly_purchases >= self.position.monthly_quota
+        quota_maintained = total_monthly_purchases >= self.position.monthly_quota
+        
+        # Update the monthly_quota_maintained field
+        if self.monthly_quota_maintained != quota_maintained:
+            self.monthly_quota_maintained = quota_maintained
+            self.save(update_fields=['monthly_quota_maintained'])
+            
+        return quota_maintained
+        
+    def get_current_month_commission_estimate(self):
+        """
+        Calculate estimated commission for current month based on downline purchases
+        
+        Returns:
+            Decimal: Estimated commission amount
+        """
+        from decimal import Decimal
+        from django.utils import timezone
+        from django.db.models import Sum
+        
+        # Only members with positions that can earn commission are eligible
+        if not self.position.can_earn_commission:
+            return Decimal('0.00')
+            
+        # Only members who maintain monthly quota are eligible
+        if not self.monthly_quota_maintained:
+            return Decimal('0.00')
+            
+        # Get current month period
+        today = timezone.now()
+        first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        # Initialize total commission
+        total_commission = Decimal('0.00')
+        
+        # Get all direct downline members
+        direct_downline = MLMMember.objects.filter(sponsor=self, is_active=True)
+        
+        for downline in direct_downline:
+            # Skip if downline's position percentage is equal or higher
+            if downline.position.discount_percentage >= self.position.discount_percentage:
+                continue
+                
+            # Calculate percentage difference
+            percentage_diff = self.position.discount_percentage - downline.position.discount_percentage
+            
+            # Get downline's current month orders
+            downline_orders = Order.objects.filter(
+                user=downline.user,
+                order_date__gte=first_day_current_month,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            )
+            
+            # Calculate purchase amount
+            purchase_amount = downline_orders.aggregate(
+                total=Sum('final_amount')
+            )['total'] or Decimal('0.00')
+            
+            # Calculate commission
+            commission = (purchase_amount * Decimal(str(percentage_diff)) / 100)
+            total_commission += commission
+            
+        return total_commission
+    
+    def __str__(self):
+        return f"{self.member_id} - {self.user.username} ({self.position.name})"
+    # def check_monthly_quota_maintenance(self, month=None):
+    #     """
+    #     Check if the member has met their monthly purchase quota
+        
+    #     Args:
+    #         month (datetime, optional): Month to check. 
+    #                                     Defaults to current month.
+        
+    #     Returns:
+    #         bool: Whether monthly quota is maintained
+    #     """
+    #     if not month:
+    #         month = timezone.now()
+        
+    #     # Calculate total purchases for the given month
+    #     total_monthly_purchases = Order.objects.filter(
+    #         user=self.user,
+    #         order_date__year=month.year,
+    #         order_date__month=month.month,
+    #         status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+    #     ).aggregate(
+    #         total_purchase=models.Sum('final_amount')
+    #     )['total_purchase'] or Decimal('0.00')
+        
+    #     # Compare with position's monthly quota
+    #     return total_monthly_purchases >= self.position.monthly_quota
 
 class KYCDocument(models.Model):
     class DocumentType(models.TextChoices):

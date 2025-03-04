@@ -1,11 +1,19 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 import logging
+from home.utils import calculate_monthly_commissions
 
 logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     help = 'Calculate monthly commissions for MLM members'
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--force',
+            action='store_true',
+            help='Force calculation regardless of date',
+        )
 
     def handle(self, *args, **kwargs):
         today = timezone.now()
@@ -18,7 +26,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Starting monthly commission calculation for {today.strftime('%B %Y')}"))
         
         # Import the calculation function
-        from home.utils import calculate_monthly_commissions
+        # from home.utils import calculate_monthly_commissions
         
         try:
             # Run the calculation

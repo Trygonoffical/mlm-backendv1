@@ -2883,6 +2883,15 @@ class WithdrawalRequestViewSet(viewsets.ModelViewSet):
         wallet.balance -= withdrawal.amount
         wallet.save()
 
+        # Create notification for user
+        if hasattr(wallet.user, 'mlm_profile'):
+            Notification.objects.create(
+                title='Withdrawal Approved',
+                message=f'Your withdrawal request for ₹{withdrawal.amount} has been approved.',
+                notification_type='WITHDRAWAL',
+                recipient=wallet.user.mlm_profile
+            )
+
         return Response(WithdrawalRequestSerializer(withdrawal).data)
 
     @action(detail=True, methods=['post'])
@@ -2906,9 +2915,101 @@ class WithdrawalRequestViewSet(viewsets.ModelViewSet):
         withdrawal.processed_at = timezone.now()
         withdrawal.save()
 
+        # Create notification for user
+        if hasattr(withdrawal.wallet.user, 'mlm_profile'):
+            Notification.objects.create(
+                title='Withdrawal Rejected',
+                message=f'Your withdrawal request for ₹{withdrawal.amount} has been rejected. Reason: {reason}',
+                notification_type='WITHDRAWAL',
+                recipient=withdrawal.wallet.user.mlm_profile
+            )
+
         return Response(WithdrawalRequestSerializer(withdrawal).data)
 
 
+    def create(self, request, *args, **kwargs):
+        """
+        Create a new withdrawal request with date constraints
+        """
+        try:
+            wallet = request.user.wallet
+            amount = request.data.get('amount')
+            
+            # Validate amount
+            if not amount:
+                return Response(
+                    {'error': 'Amount is required'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            try:
+                amount = Decimal(amount)
+            except:
+                return Response(
+                    {'error': 'Invalid amount'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Check for sufficient balance
+            if amount > wallet.balance:
+                return Response(
+                    {'error': 'Insufficient balance'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Check date constraints - only allow before 15th of the month
+            today = timezone.now()
+            if today.day > 15:
+                return Response(
+                    {'error': 'Withdrawal requests can only be made before the 15th of the month'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Check for existing pending requests
+            pending_requests = WithdrawalRequest.objects.filter(
+                wallet=wallet,
+                status='PENDING'
+            ).exists()
+            
+            if pending_requests:
+                return Response(
+                    {'error': 'You already have a pending withdrawal request'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            # Create withdrawal request
+            withdrawal = WithdrawalRequest.objects.create(
+                wallet=wallet,
+                amount=amount
+            )
+            
+            # Create notification
+            if hasattr(request.user, 'mlm_profile'):
+                Notification.objects.create(
+                    title='Withdrawal Request Submitted',
+                    message=f'Your withdrawal request for ₹{amount} has been submitted and is pending approval.',
+                    notification_type='WITHDRAWAL',
+                    recipient=request.user.mlm_profile
+                )
+                
+            # Create admin notification
+            Notification.objects.create(
+                title='New Withdrawal Request',
+                message=f'A new withdrawal request of ₹{amount} has been submitted by {request.user.username}.',
+                notification_type='SYSTEM'
+            )
+            
+            return Response(
+                WithdrawalRequestSerializer(withdrawal).data,
+                status=status.HTTP_201_CREATED
+            )
+            
+        except Exception as e:
+            logger.error(f"Error creating withdrawal request: {str(e)}")
+            return Response(
+                {'error': 'An unexpected error occurred'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 # ------------------ Notification -----------------------
 # class NotificationViewSet(viewsets.ModelViewSet):
@@ -3399,6 +3500,173 @@ class MLMMemberTreeView(APIView):
 class MLMMemberDetailsView(APIView):
     permission_classes = [IsAuthenticated]
 
+
+    def get(self, request, member_id):
+        try:
+            # Determine if the user has permission to view the member
+            if request.user.role == 'ADMIN':
+                # Admins can view any member's details
+                member = get_object_or_404(MLMMember, member_id=member_id)
+            elif request.user.role == 'MLM_MEMBER':
+                # MLM member can only view their direct and indirect downline
+                current_member = request.user.mlm_profile
+                
+                # Get the target member
+                member = get_object_or_404(MLMMember, member_id=member_id)
+                
+                # Check if the requested member is in the current member's downline
+                def is_in_downline(current, target):
+                    if current == target:
+                        return False
+                    
+                    referrals = MLMMember.objects.filter(sponsor=current)
+                    for referral in referrals:
+                        if referral == target or is_in_downline(referral, target):
+                            return True
+                    return False
+
+                # If not in downline and not the same member, deny access
+                if not is_in_downline(current_member, member) and current_member != member:
+                    return Response({
+                        'error': 'You are not authorized to view this member\'s details'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            else:
+                return Response({
+                    'error': 'Unauthorized access'
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Detailed member information
+            member_details = {
+                'personal_info': {
+                    'member_id': member.member_id,
+                    'name': member.user.get_full_name() or member.user.username,
+                    'email': member.user.email,
+                    'phone_number': member.user.phone_number,
+                    'date_joined': member.created_at,
+                    'is_active': member.is_active
+                },
+                'position_details': {
+                    'current_position': member.position.name if member.position else None,
+                    'discount_percentage': float(member.position.discount_percentage) if member.position else None
+                },
+                'financial_details': {
+                    'total_earnings': float(member.total_earnings),
+                    'total_bp': member.total_bp,
+                    'current_month_purchase': float(member.current_month_purchase)
+                },
+                'network_details': {
+                    'direct_referrals': MLMMember.objects.filter(sponsor=member).count(),
+                    'total_network_size': self.get_total_network_size(member)
+                },
+                'recent_commissions': self.get_recent_commissions(member)
+            }
+
+            # Add commission preview data
+            commission_preview = self.get_commission_preview(member)
+            member_details['financial_details']['commission_preview'] = commission_preview
+
+            return Response(member_details)
+        
+        except Exception as e:
+            logger.error(f"Error fetching member details: {e}")
+            return Response({
+                'error': 'An error occurred while fetching member details'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def get_total_network_size(self, member):
+        # Recursive function to count total network size
+        def count_network(current_member):
+            referrals = MLMMember.objects.filter(sponsor=current_member)
+            total = referrals.count()
+            for referral in referrals:
+                total += count_network(referral)
+            return total
+        
+        return count_network(member)
+
+    def get_recent_commissions(self, member, limit=5):
+        # Get recent commissions for the member
+        recent_commissions = Commission.objects.filter(
+            member=member
+        ).order_by('-date')[:limit]
+
+        return [
+            {
+                'date': commission.date,
+                'amount': float(commission.amount),
+                'from_member': commission.from_member.user.get_full_name() or commission.from_member.member_id
+            }
+            for commission in recent_commissions
+        ]
+        
+    def get_commission_preview(self, member):
+        """
+        Get commission preview data for a member
+        """
+        try:
+            # Check if position allows earning commission
+            if not member.position.can_earn_commission:
+                return {
+                    'current_month': '₹0.00',
+                    'last_month': '₹0.00',
+                    'pending': '₹0.00'
+                }
+                
+            # Get dates for current and last month
+            today = timezone.now()
+            first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            last_month = (today.replace(day=1) - timezone.timedelta(days=1))
+            first_day_last_month = last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            # Get last month's earned commissions
+            last_month_earned = Commission.objects.filter(
+                member=member,
+                is_paid=True,
+                date__gte=first_day_last_month,
+                date__lt=first_day_current_month
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            
+            # Get pending commissions
+            total_pending = Commission.objects.filter(
+                member=member,
+                is_paid=False
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            
+            # Calculate current month estimate (simplified version)
+            # For a more detailed estimate, you would use the full calculation from MLMLiveCommissionView
+            downline_members = MLMMember.objects.filter(sponsor=member).select_related('position')
+            current_month_estimate = Decimal('0.00')
+            
+            for downline in downline_members:
+                # Only calculate if member's position percentage is higher
+                if member.position.discount_percentage > downline.position.discount_percentage:
+                    percentage_diff = member.position.discount_percentage - downline.position.discount_percentage
+                    
+                    # Get downline purchases this month
+                    downline_purchases = Order.objects.filter(
+                        user=downline.user,
+                        order_date__gte=first_day_current_month,
+                        status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+                    ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
+                    
+                    # Calculate commission
+                    commission = (downline_purchases * Decimal(str(percentage_diff)) / 100)
+                    current_month_estimate += commission
+            
+            return {
+                'current_month': f'₹{current_month_estimate:.2f}',
+                'last_month': f'₹{last_month_earned:.2f}',
+                'pending': f'₹{total_pending:.2f}'
+            }
+        
+        except Exception as e:
+            logger.error(f"Error calculating commission preview: {str(e)}")
+            return {
+                'current_month': '₹0.00',
+                'last_month': '₹0.00', 
+                'pending': '₹0.00'
+            }
+
     # def get(self, request, member_id):
     #     try:
     #         # Get the current logged-in user's MLM profile
@@ -3475,73 +3743,73 @@ class MLMMemberDetailsView(APIView):
     #         return Response({
     #             'error': 'An error occurred while fetching member details'
     #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    def get(self, request, member_id):
-        try:
-            # Determine if the user has permission to view the member
-            if request.user.role == 'ADMIN':
-                # Admins can view any member's details
-                member = get_object_or_404(MLMMember, member_id=member_id)
-            elif request.user.role == 'MLM_MEMBER':
-                # MLM member can only view their direct and indirect downline
-                current_member = request.user.mlm_profile
+    # def get(self, request, member_id):
+    #     try:
+    #         # Determine if the user has permission to view the member
+    #         if request.user.role == 'ADMIN':
+    #             # Admins can view any member's details
+    #             member = get_object_or_404(MLMMember, member_id=member_id)
+    #         elif request.user.role == 'MLM_MEMBER':
+    #             # MLM member can only view their direct and indirect downline
+    #             current_member = request.user.mlm_profile
                 
-                # Get the target member
-                member = get_object_or_404(MLMMember, member_id=member_id)
+    #             # Get the target member
+    #             member = get_object_or_404(MLMMember, member_id=member_id)
                 
-                # Check if the requested member is in the current member's downline
-                def is_in_downline(current, target):
-                    if current == target:
-                        return False
+    #             # Check if the requested member is in the current member's downline
+    #             def is_in_downline(current, target):
+    #                 if current == target:
+    #                     return False
                     
-                    referrals = MLMMember.objects.filter(sponsor=current)
-                    for referral in referrals:
-                        if referral == target or is_in_downline(referral, target):
-                            return True
-                    return False
+    #                 referrals = MLMMember.objects.filter(sponsor=current)
+    #                 for referral in referrals:
+    #                     if referral == target or is_in_downline(referral, target):
+    #                         return True
+    #                 return False
 
-                # If not in downline and not the same member, deny access
-                if not is_in_downline(current_member, member) and current_member != member:
-                    return Response({
-                        'error': 'You are not authorized to view this member\'s details'
-                    }, status=status.HTTP_403_FORBIDDEN)
-            else:
-                return Response({
-                    'error': 'Unauthorized access'
-                }, status=status.HTTP_403_FORBIDDEN)
+    #             # If not in downline and not the same member, deny access
+    #             if not is_in_downline(current_member, member) and current_member != member:
+    #                 return Response({
+    #                     'error': 'You are not authorized to view this member\'s details'
+    #                 }, status=status.HTTP_403_FORBIDDEN)
+    #         else:
+    #             return Response({
+    #                 'error': 'Unauthorized access'
+    #             }, status=status.HTTP_403_FORBIDDEN)
 
-            # Detailed member information
-            member_details = {
-                'personal_info': {
-                    'member_id': member.member_id,
-                    'name': member.user.get_full_name() or member.user.username,
-                    'email': member.user.email,
-                    'phone_number': member.user.phone_number,
-                    'date_joined': member.created_at,
-                    'is_active': member.is_active
-                },
-                'position_details': {
-                    'current_position': member.position.name if member.position else None,
-                    'discount_percentage': float(member.position.discount_percentage) if member.position else None
-                },
-                'financial_details': {
-                    'total_earnings': float(member.total_earnings),
-                    'total_bp': member.total_bp,
-                    'current_month_purchase': float(member.current_month_purchase)
-                },
-                'network_details': {
-                    'direct_referrals': MLMMember.objects.filter(sponsor=member).count(),
-                    'total_network_size': self.get_total_network_size(member)
-                },
-                'recent_commissions': self.get_recent_commissions(member)
-            }
+    #         # Detailed member information
+    #         member_details = {
+    #             'personal_info': {
+    #                 'member_id': member.member_id,
+    #                 'name': member.user.get_full_name() or member.user.username,
+    #                 'email': member.user.email,
+    #                 'phone_number': member.user.phone_number,
+    #                 'date_joined': member.created_at,
+    #                 'is_active': member.is_active
+    #             },
+    #             'position_details': {
+    #                 'current_position': member.position.name if member.position else None,
+    #                 'discount_percentage': float(member.position.discount_percentage) if member.position else None
+    #             },
+    #             'financial_details': {
+    #                 'total_earnings': float(member.total_earnings),
+    #                 'total_bp': member.total_bp,
+    #                 'current_month_purchase': float(member.current_month_purchase)
+    #             },
+    #             'network_details': {
+    #                 'direct_referrals': MLMMember.objects.filter(sponsor=member).count(),
+    #                 'total_network_size': self.get_total_network_size(member)
+    #             },
+    #             'recent_commissions': self.get_recent_commissions(member)
+    #         }
 
-            return Response(member_details)
+    #         return Response(member_details)
         
-        except Exception as e:
-            logger.error(f"Error fetching member details: {e}")
-            return Response({
-                'error': 'An error occurred while fetching member details'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    #     except Exception as e:
+    #         logger.error(f"Error fetching member details: {e}")
+    #         return Response({
+    #             'error': 'An error occurred while fetching member details'
+    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     # def get(self, request, member_id):
     #     try:
     #         # Determine if the user has permission to view the member
@@ -3607,31 +3875,31 @@ class MLMMemberDetailsView(APIView):
     #             'error': 'An error occurred while fetching member details'
     #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def get_total_network_size(self, member):
-        # Recursive function to count total network size
-        def count_network(current_member):
-            referrals = MLMMember.objects.filter(sponsor=current_member)
-            total = referrals.count()
-            for referral in referrals:
-                total += count_network(referral)
-            return total
+    # def get_total_network_size(self, member):
+    #     # Recursive function to count total network size
+    #     def count_network(current_member):
+    #         referrals = MLMMember.objects.filter(sponsor=current_member)
+    #         total = referrals.count()
+    #         for referral in referrals:
+    #             total += count_network(referral)
+    #         return total
         
-        return count_network(member)
+    #     return count_network(member)
 
-    def get_recent_commissions(self, member, limit=5):
-        # Get recent commissions for the member
-        recent_commissions = Commission.objects.filter(
-            member=member
-        ).order_by('-date')[:limit]
+    # def get_recent_commissions(self, member, limit=5):
+    #     # Get recent commissions for the member
+    #     recent_commissions = Commission.objects.filter(
+    #         member=member
+    #     ).order_by('-date')[:limit]
 
-        return [
-            {
-                'date': commission.date,
-                'amount': float(commission.amount),
-                'from_member': commission.from_member.user.get_full_name() or commission.from_member.member_id
-            }
-            for commission in recent_commissions
-        ]
+    #     return [
+    #         {
+    #             'date': commission.date,
+    #             'amount': float(commission.amount),
+    #             'from_member': commission.from_member.user.get_full_name() or commission.from_member.member_id
+    #         }
+    #         for commission in recent_commissions
+        # ]
 
 
 # class MLMReportView(APIView):
@@ -5441,32 +5709,35 @@ class MLMLiveCommissionView(APIView):
     
     def get(self, request, member_id):
         try:
-            # Check authorization
+            # Check permissions - either admin or the member themselves can view
             if request.user.role != 'ADMIN' and (not hasattr(request.user, 'mlm_profile') or request.user.mlm_profile.member_id != member_id):
                 return Response({
-                    'error': 'You are not authorized to view this data'
+                    'error': 'You do not have permission to view this data'
                 }, status=status.HTTP_403_FORBIDDEN)
             
+            # Get the MLM member
             try:
-                member = MLMMember.objects.select_related('position', 'user').get(member_id=member_id)
+                member = MLMMember.objects.get(member_id=member_id)
             except MLMMember.DoesNotExist:
                 return Response({
                     'error': 'Member not found'
                 }, status=status.HTTP_404_NOT_FOUND)
             
-            # Check if member's position allows earning commissions
+            # Check if member's position can earn commissions
             if not member.position.can_earn_commission:
                 return Response({
                     'current_month_estimate': "0.00",
                     'last_month_earned': "0.00",
                     'total_pending': "0.00",
-                    'level_breakdown': []
+                    'level_breakdown': [],
+                    'top_performers': [],
+                    'recent_transactions': []
                 })
 
             # Get current month and last month dates
             today = timezone.now()
             first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            last_month = (today.replace(day=1) - datetime.timedelta(days=1))
+            last_month = (today.replace(day=1) - timedelta(days=1))
             first_day_last_month = last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             
             # Calculate last month's earned commissions
@@ -5474,7 +5745,7 @@ class MLMLiveCommissionView(APIView):
                 member=member,
                 is_paid=True,
                 date__gte=first_day_last_month,
-                date__lte=first_day_current_month
+                date__lt=first_day_current_month
             ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
 
             # Calculate total pending commissions
@@ -5483,56 +5754,38 @@ class MLMLiveCommissionView(APIView):
                 is_paid=False
             ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
 
-            # Get downline members by level
-            level_breakdown = []
-            current_month_estimate = Decimal('0.00')
+            # Get downline members by level for organizational purposes only
             downline_by_level = self.get_downline_by_level(member)
-
-            # Get current month orders
-            current_month_orders = Order.objects.filter(
-                order_date__gte=first_day_current_month,
-                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            
+            # Calculate level breakdown - using pure differential model
+            level_breakdown, current_month_estimate = self.calculate_level_commission_differential(
+                member, 
+                downline_by_level
             )
+            
+            # Get top performers
+            top_performers = self.get_top_performers_differential(member, downline_by_level)
+            
+            # Get recent transactions
+            recent_transactions = self.get_recent_transactions_differential(member, downline_by_level)
 
-            # Calculate level breakdown
-            for level, members in downline_by_level.items():
-                member_ids = [m['user_id'] for m in members]
-                if member_ids:
-                    level_purchases = current_month_orders.filter(
-                        user_id__in=member_ids
-                    ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
-                    
-                    commission_rate = self.get_commission_rate(member.position, level)
-                    level_commission = (level_purchases * commission_rate) / 100
-                    current_month_estimate += level_commission
-
-                    level_breakdown.append({
-                        'level': level,
-                        'member_count': len(member_ids),
-                        'total_purchases': str(level_purchases),
-                        'commission_rate': str(commission_rate),
-                        'estimated_commission': str(level_commission)
-                    })
-
-            response_data = {
+            return Response({
                 'current_month_estimate': str(current_month_estimate),
                 'last_month_earned': str(last_month_earned),
                 'total_pending': str(total_pending),
                 'level_breakdown': level_breakdown,
-                'top_performers': self.get_top_performers(member, downline_by_level, current_month_orders),
-                'recent_transactions': self.get_recent_transactions(member, downline_by_level, current_month_orders)
-            }
-
-            return Response(response_data)
-
+                'top_performers': top_performers,
+                'recent_transactions': recent_transactions
+            })
+            
         except Exception as e:
-            logger.error(f"Error in live commission calculation: {str(e)}", exc_info=True)
+            logger.error(f"Error in MLMLiveCommissionView: {str(e)}", exc_info=True)
             return Response({
                 'error': 'An error occurred while calculating commissions'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-    def get_downline_by_level(self, root_member, max_level=10):
-        """Get all downline members organized by level"""
+    def get_downline_by_level(self, member, max_level=5):
+        """Get all downline members organized by level (for display purposes)"""
         result = {}
         
         def traverse(current_member, level=1):
@@ -5549,41 +5802,113 @@ class MLMLiveCommissionView(APIView):
                 if level not in result:
                     result[level] = []
                     
-                for member in downline:
+                for downline_member in downline:
                     result[level].append({
-                        'id': member.id,
-                        'member_id': member.member_id,
-                        'user_id': member.user.id,
-                        'position': member.position
+                        'id': downline_member.id,
+                        'member_id': downline_member.member_id,
+                        'user_id': downline_member.user.id,
+                        'position': downline_member.position,
+                        'position_percentage': downline_member.position.discount_percentage,
+                        'position_name': downline_member.position.name
                     })
                     
                     # Recursively get next level
-                    traverse(member, level + 1)
+                    traverse(downline_member, level + 1)
         
-        traverse(root_member)
+        traverse(member)
         return result
-
-    def get_commission_rate(self, position, level):
+    
+    def calculate_level_commission_differential(self, member, downline_data):
         """
-        Calculate commission rate based on position and level
-        Returns decimal percentage (e.g., 5.0 for 5%)
+        Calculate commission breakdown by level using pure differential model
+        Commission is based solely on position percentage difference
         """
-        base_rate = position.commission_percentage
+        level_breakdown = []
+        current_month_estimate = Decimal('0.00')
         
-        # Level-based reduction factors
-        level_multipliers = {
-            1: Decimal('1.0'),    # 100% of base rate
-            2: Decimal('0.5'),    # 50% of base rate
-            3: Decimal('0.25'),   # 25% of base rate
-            4: Decimal('0.125'),  # 12.5% of base rate
-            5: Decimal('0.0625')  # 6.25% of base rate
-        }
+        # Get current month orders
+        today = timezone.now()
+        first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         
-        multiplier = level_multipliers.get(level, Decimal('0.03125'))  # Default to 3.125% for higher levels
-        return base_rate * multiplier
-
-    def get_top_performers(self, member, downline_by_level, current_month_orders):
-        """Get top performing downline members"""
+        current_month_orders = Order.objects.filter(
+            order_date__gte=first_day_current_month,
+            status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+        )
+        
+        # Member's position percentage
+        member_percentage = member.position.discount_percentage
+        
+        # Calculate level breakdown
+        for level, members in downline_data.items():
+            level_total_purchases = Decimal('0.00')
+            level_total_commission = Decimal('0.00')
+            downline_count = 0
+            
+            for downline_info in members:
+                # Only consider downline with lower position percentage
+                downline_percentage = downline_info['position_percentage']
+                
+                if member_percentage > downline_percentage:
+                    # Calculate percentage difference
+                    difference_percentage = member_percentage - downline_percentage
+                    
+                    # Get user's purchases
+                    user_id = downline_info['user_id']
+                    user_purchases = current_month_orders.filter(
+                        user_id=user_id
+                    ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
+                    
+                    if user_purchases > 0:
+                        # Calculate commission based on differential model
+                        commission = (user_purchases * difference_percentage) / 100
+                        
+                        # Add to totals
+                        level_total_purchases += user_purchases
+                        level_total_commission += commission
+                        downline_count += 1
+            
+            # Add level breakdown if there were qualifying purchases
+            if level_total_purchases > 0:
+                # Calculate effective commission rate for this level
+                # This is just for display purposes - the actual calculation uses individual differences
+                effective_rate = (level_total_commission / level_total_purchases) * 100
+                
+                level_breakdown.append({
+                    'level': level,
+                    'member_count': downline_count,
+                    'total_purchases': str(level_total_purchases),
+                    'commission_rate': str(effective_rate),  # Average effective rate
+                    'estimated_commission': str(level_total_commission)
+                })
+                
+                current_month_estimate += level_total_commission
+        
+        # Sort breakdown by level
+        level_breakdown.sort(key=lambda x: x['level'])
+        
+        return level_breakdown, current_month_estimate
+    
+    def calculate_commission_differential(self, member, downline_member, purchase_amount):
+        """
+        Calculate commission based purely on position percentage difference
+        """
+        member_percentage = member.position.discount_percentage
+        downline_percentage = downline_member['position_percentage']
+        
+        # Only calculate if member's percentage is higher
+        if member_percentage <= downline_percentage:
+            return Decimal('0.00')
+        
+        # Calculate difference percentage
+        difference_percentage = member_percentage - downline_percentage
+        
+        # Calculate commission amount based on differential model
+        commission_amount = (purchase_amount * difference_percentage) / 100
+        
+        return commission_amount
+    
+    def get_top_performers_differential(self, member, downline_by_level, limit=5):
+        """Get top performing downline members using differential model"""
         try:
             # Flatten downline data
             all_downline = []
@@ -5598,30 +5923,66 @@ class MLMLiveCommissionView(APIView):
             if not user_ids:
                 return []
             
+            # Get current month
+            today = timezone.now()
+            first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
             # Calculate purchases for each downline member
-            user_purchases = current_month_orders.filter(
-                user_id__in=user_ids
-            ).values('user_id').annotate(
-                total_purchases=Sum('final_amount')
-            ).order_by('-total_purchases')[:5]  # Top 5 performers
+            user_purchases = {}
+            
+            current_month_orders = Order.objects.filter(
+                user_id__in=user_ids,
+                order_date__gte=first_day_current_month,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            )
+            
+            for order in current_month_orders:
+                if order.user_id not in user_purchases:
+                    user_purchases[order.user_id] = Decimal('0.00')
+                user_purchases[order.user_id] += order.final_amount
+            
+            # Calculate commissions based on differential model
+            user_commissions = {}
+            for user_id, purchase_amount in user_purchases.items():
+                downline_info = next((m for m in all_downline if m['user_id'] == user_id), None)
+                if downline_info:
+                    # Calculate commission using differential model
+                    commission = self.calculate_commission_differential(
+                        member, 
+                        downline_info, 
+                        purchase_amount
+                    )
+                    user_commissions[user_id] = {
+                        'purchase_amount': purchase_amount,
+                        'commission': commission,
+                        'downline_info': downline_info
+                    }
+            
+            # Sort by commission amount (highest first)
+            sorted_users = sorted(
+                user_commissions.items(),
+                key=lambda x: x[1]['commission'],
+                reverse=True
+            )[:limit]
             
             top_performers = []
-            for purchase in user_purchases:
-                user_id = purchase['user_id']
-                member_data = next((m for m in all_downline if m['user_id'] == user_id), None)
-                
-                if member_data:
-                    mlm_member = MLMMember.objects.select_related('user', 'position').get(user_id=user_id)
-                    commission_rate = self.get_commission_rate(member.position, member_data['level'])
-                    commission_amount = (purchase['total_purchases'] * commission_rate) / 100
+            for user_id, data in sorted_users:
+                if data['commission'] > 0:
+                    # Get MLM member object to access full details
+                    downline_member = MLMMember.objects.select_related('user', 'position').get(
+                        id=data['downline_info']['id']
+                    )
                     
                     top_performers.append({
-                        'member_id': mlm_member.member_id,
-                        'name': f"{mlm_member.user.first_name} {mlm_member.user.last_name}",
-                        'level': member_data['level'],
-                        'position': mlm_member.position.name,
-                        'total_purchases': str(purchase['total_purchases']),
-                        'your_commission': str(commission_amount)
+                        'member_id': downline_member.member_id,
+                        'name': f"{downline_member.user.first_name} {downline_member.user.last_name}",
+                        'level': data['downline_info']['level'],
+                        'position': downline_member.position.name,
+                        'position_percentage': str(downline_member.position.discount_percentage),
+                        'your_percentage': str(member.position.discount_percentage),
+                        'difference': str(member.position.discount_percentage - downline_member.position.discount_percentage),
+                        'total_purchases': str(data['purchase_amount']),
+                        'your_commission': str(data['commission'])
                     })
             
             return top_performers
@@ -5629,9 +5990,9 @@ class MLMLiveCommissionView(APIView):
         except Exception as e:
             logger.error(f"Error getting top performers: {str(e)}")
             return []
-
-    def get_recent_transactions(self, member, downline_by_level, current_month_orders):
-        """Get recent transactions from downline members"""
+    
+    def get_recent_transactions_differential(self, member, downline_by_level, limit=10):
+        """Get recent transactions from downline members using differential model"""
         try:
             # Flatten downline data
             all_downline = []
@@ -5646,26 +6007,43 @@ class MLMLiveCommissionView(APIView):
             if not user_ids:
                 return []
             
+            # Get current month
+            today = timezone.now()
+            first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
             # Get recent orders
-            recent_orders = current_month_orders.filter(
-                user_id__in=user_ids
-            ).select_related('user').order_by('-order_date')[:10]
+            recent_orders = Order.objects.filter(
+                user_id__in=user_ids,
+                order_date__gte=first_day_current_month,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            ).select_related('user').order_by('-order_date')[:limit]
             
             transactions = []
             for order in recent_orders:
-                member_data = next((m for m in all_downline if m['user_id'] == order.user.id), None)
-                if member_data:
-                    commission_rate = self.get_commission_rate(member.position, member_data['level'])
-                    commission_amount = (order.final_amount * commission_rate) / 100
+                # Find member details
+                downline_info = next((m for m in all_downline if m['user_id'] == order.user.id), None)
+                
+                if downline_info:
+                    # Calculate commission using differential model
+                    commission_amount = self.calculate_commission_differential(
+                        member,
+                        downline_info,
+                        order.final_amount
+                    )
                     
-                    transactions.append({
-                        'date': order.order_date,
-                        'member_name': f"{order.user.first_name} {order.user.last_name}",
-                        'level': member_data['level'],
-                        'order_id': order.order_number,
-                        'amount': str(order.final_amount),
-                        'your_commission': str(commission_amount)
-                    })
+                    # Only include transactions that generate commission
+                    if commission_amount > 0:
+                        transactions.append({
+                            'date': order.order_date.isoformat(),
+                            'member_name': f"{order.user.first_name} {order.user.last_name}",
+                            'level': downline_info['level'],
+                            'order_id': order.order_number,
+                            'amount': str(order.final_amount),
+                            'your_percentage': str(member.position.discount_percentage),
+                            'their_percentage': str(downline_info['position_percentage']),
+                            'difference': str(member.position.discount_percentage - downline_info['position_percentage']),
+                            'your_commission': str(commission_amount)
+                        })
             
             return transactions
             
@@ -7275,6 +7653,74 @@ class MLMMemberReportsView(APIView):
         return str(period)
 
 
+# class LiveCommissionDashboardView(APIView):
+#     """
+#     API endpoint to show real-time commission calculations and forecasts 
+#     for MLM members based on current month performance
+#     """
+#     authentication_classes = [JWTAuthentication]
+#     permission_classes = [IsAuthenticated]
+    
+#     def get(self, request):
+#         try:
+#             # Ensure the user is an MLM member
+#             if request.user.role != 'MLM_MEMBER':
+#                 return Response({
+#                     'status': False,
+#                     'message': 'Only MLM members can access this dashboard'
+#                 }, status=status.HTTP_403_FORBIDDEN)
+                
+#             # Get the MLM member profile
+#             member = request.user.mlm_profile
+            
+#             # Check if the member has an active position that can earn commissions
+#             if not member.position.can_earn_commission:
+#                 return Response({
+#                     'status': False,
+#                     'message': 'Your current position cannot earn commissions. Please upgrade to a higher position.'
+#                 }, status=status.HTTP_403_FORBIDDEN)
+                
+#             # Import the function to get live commission data
+#             from home.utils import get_live_commission_data
+            
+#             # Get commission data
+#             commission_data = get_live_commission_data(member)
+            
+#             # Get current month and calculation dates
+#             today = timezone.now()
+#             current_month = today.strftime('%B %Y')
+            
+#             # Determine next commission calculation date
+#             first_day_next_month = (today.replace(day=28) + timezone.timedelta(days=4)).replace(day=1)
+#             next_calculation_date = first_day_next_month.strftime('%d %B %Y')
+            
+#             # Determine next withdrawal availability date
+#             if today.day < 15:
+#                 # If we're before the 15th, next withdrawal is on the 15th
+#                 next_withdrawal_date = today.replace(day=15).strftime('%d %B %Y')
+#             else:
+#                 # If we're on or after the 15th, next withdrawal is on the 15th of next month
+#                 next_withdrawal_date = first_day_next_month.replace(day=15).strftime('%d %B %Y')
+                
+#             # Add additional info to the response
+#             response_data = {
+#                 'status': True,
+#                 'current_month': current_month,
+#                 'next_calculation_date': next_calculation_date,
+#                 'next_withdrawal_date': next_withdrawal_date,
+#                 'commission_data': commission_data
+#             }
+            
+#             return Response(response_data)
+            
+#         except Exception as e:
+#             logger.error(f"Error in LiveCommissionDashboardView: {str(e)}")
+#             return Response({
+#                 'status': False,
+#                 'message': 'An error occurred while loading the commission dashboard',
+#                 'error': str(e)
+#             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class LiveCommissionDashboardView(APIView):
     """
     API endpoint to show real-time commission calculations and forecasts 
@@ -7285,64 +7731,369 @@ class LiveCommissionDashboardView(APIView):
     
     def get(self, request):
         try:
-            # Ensure the user is an MLM member
-            if request.user.role != 'MLM_MEMBER':
+            # Check if a specific member_id is requested (for admin users)
+            member_id = request.query_params.get('member_id')
+            
+            # Determine which member's data to fetch
+            if request.user.role == 'ADMIN' and member_id:
+                # Admin can view any member's commissions
+                try:
+                    member = MLMMember.objects.get(member_id=member_id)
+                except MLMMember.DoesNotExist:
+                    return Response({
+                        'status': False,
+                        'message': f'Member with ID {member_id} not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+            elif request.user.role == 'MLM_MEMBER':
+                # Member views their own commissions
+                member = request.user.mlm_profile
+            else:
                 return Response({
                     'status': False,
-                    'message': 'Only MLM members can access this dashboard'
+                    'message': 'Only MLM members and admins can access this dashboard'
                 }, status=status.HTTP_403_FORBIDDEN)
                 
-            # Get the MLM member profile
-            member = request.user.mlm_profile
-            
             # Check if the member has an active position that can earn commissions
             if not member.position.can_earn_commission:
                 return Response({
-                    'status': False,
-                    'message': 'Your current position cannot earn commissions. Please upgrade to a higher position.'
-                }, status=status.HTTP_403_FORBIDDEN)
+                    'status': True,
+                    'message': 'Your current position cannot earn commissions. Please upgrade to a higher position.',
+                    'commission_data': {
+                        'current_month_estimate': "0.00",
+                        'last_month_earned': "0.00",
+                        'total_pending': "0.00",
+                        'level_breakdown': [],
+                        'top_performers': [],
+                        'recent_transactions': []
+                    }
+                })
                 
-            # Import the function to get live commission data
-            from home.utils import get_live_commission_data
-            
-            # Get commission data
-            commission_data = get_live_commission_data(member)
-            
-            # Get current month and calculation dates
+            # Calculate current month, last month periods
             today = timezone.now()
-            current_month = today.strftime('%B %Y')
+            first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            last_month_end = first_day_current_month - timedelta(days=1)
+            first_day_last_month = last_month_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             
-            # Determine next commission calculation date
-            first_day_next_month = (today.replace(day=28) + timezone.timedelta(days=4)).replace(day=1)
-            next_calculation_date = first_day_next_month.strftime('%d %B %Y')
+            # 1. Calculate last month's earned commissions
+            last_month_earned = Commission.objects.filter(
+                member=member,
+                is_paid=True,
+                date__gte=first_day_last_month,
+                date__lt=first_day_current_month
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
             
-            # Determine next withdrawal availability date
-            if today.day < 15:
-                # If we're before the 15th, next withdrawal is on the 15th
-                next_withdrawal_date = today.replace(day=15).strftime('%d %B %Y')
-            else:
-                # If we're on or after the 15th, next withdrawal is on the 15th of next month
-                next_withdrawal_date = first_day_next_month.replace(day=15).strftime('%d %B %Y')
-                
-            # Add additional info to the response
-            response_data = {
-                'status': True,
-                'current_month': current_month,
-                'next_calculation_date': next_calculation_date,
-                'next_withdrawal_date': next_withdrawal_date,
-                'commission_data': commission_data
+            # 2. Calculate total pending commissions
+            total_pending = Commission.objects.filter(
+                member=member,
+                is_paid=False
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            
+            # 3. Get downline members by level
+            downline_by_level = self.get_downline_by_level(member)
+            
+            # 4. Calculate level breakdown using pure differential model
+            level_breakdown, current_month_estimate = self.calculate_level_commission_differential(
+                member, 
+                downline_by_level
+            )
+            
+            # 5. Get top performers
+            top_performers = self.get_top_performers_differential(member, downline_by_level)
+            
+            # 6. Get recent transactions
+            recent_transactions = self.get_recent_transactions_differential(member, downline_by_level)
+            
+            # Prepare response
+            commission_data = {
+                'current_month_estimate': str(current_month_estimate),
+                'last_month_earned': str(last_month_earned),
+                'total_pending': str(total_pending),
+                'level_breakdown': level_breakdown,
+                'top_performers': top_performers,
+                'recent_transactions': recent_transactions
             }
             
-            return Response(response_data)
+            return Response({
+                'status': True,
+                'message': 'Live commission data retrieved successfully',
+                'commission_data': commission_data,
+                'next_calculation_date': first_day_current_month.replace(month=first_day_current_month.month+1 if first_day_current_month.month < 12 else 1, year=first_day_current_month.year if first_day_current_month.month < 12 else first_day_current_month.year+1).strftime('%Y-%m-%d'),
+                'current_month': first_day_current_month.strftime('%B %Y')
+            })
             
         except Exception as e:
             logger.error(f"Error in LiveCommissionDashboardView: {str(e)}")
             return Response({
                 'status': False,
-                'message': 'An error occurred while loading the commission dashboard',
-                'error': str(e)
+                'message': f'An error occurred while loading the commission dashboard: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def get_downline_by_level(self, member, max_level=5):
+        """Get all downline members organized by level"""
+        result = {}
         
+        def traverse(current_member, level=1):
+            if level > max_level:
+                return
+                
+            # Get direct downline
+            downline = MLMMember.objects.filter(
+                sponsor=current_member,
+                is_active=True
+            ).select_related('user', 'position')
+            
+            if downline.exists():
+                if level not in result:
+                    result[level] = []
+                    
+                for downline_member in downline:
+                    result[level].append({
+                        'id': downline_member.id,
+                        'member_id': downline_member.member_id,
+                        'user_id': downline_member.user.id,
+                        'position': downline_member.position,
+                        'position_percentage': downline_member.position.discount_percentage,
+                        'position_name': downline_member.position.name
+                    })
+                    
+                    # Recursively get next level
+                    traverse(downline_member, level + 1)
+        
+        traverse(member)
+        return result
+    
+    def calculate_level_commission_differential(self, member, downline_data):
+        """
+        Calculate commission breakdown by level using pure differential model
+        Commission is based solely on position percentage difference
+        """
+        level_breakdown = []
+        current_month_estimate = Decimal('0.00')
+        
+        # Get current month orders
+        today = timezone.now()
+        first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        current_month_orders = Order.objects.filter(
+            order_date__gte=first_day_current_month,
+            status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+        )
+        
+        # Member's position percentage
+        member_percentage = member.position.discount_percentage
+        
+        # Calculate level breakdown
+        for level, members in downline_data.items():
+            level_total_purchases = Decimal('0.00')
+            level_total_commission = Decimal('0.00')
+            downline_count = 0
+            
+            for downline_info in members:
+                # Only consider downline with lower position percentage
+                downline_percentage = downline_info['position_percentage']
+                
+                if member_percentage > downline_percentage:
+                    # Calculate percentage difference
+                    difference_percentage = member_percentage - downline_percentage
+                    
+                    # Get user's purchases
+                    user_id = downline_info['user_id']
+                    user_purchases = current_month_orders.filter(
+                        user_id=user_id
+                    ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
+                    
+                    if user_purchases > 0:
+                        # Calculate commission based on differential model
+                        commission = (user_purchases * difference_percentage) / 100
+                        
+                        # Add to totals
+                        level_total_purchases += user_purchases
+                        level_total_commission += commission
+                        downline_count += 1
+            
+            # Add level breakdown if there were qualifying purchases
+            if level_total_purchases > 0:
+                # Calculate effective commission rate for this level
+                # This is just for display purposes - the actual calculation uses individual differences
+                effective_rate = (level_total_commission / level_total_purchases) * 100
+                
+                level_breakdown.append({
+                    'level': level,
+                    'member_count': downline_count,
+                    'total_purchases': str(level_total_purchases),
+                    'commission_rate': str(effective_rate),  # Average effective rate
+                    'estimated_commission': str(level_total_commission)
+                })
+                
+                current_month_estimate += level_total_commission
+        
+        # Sort breakdown by level
+        level_breakdown.sort(key=lambda x: x['level'])
+        
+        return level_breakdown, current_month_estimate
+    
+    def calculate_commission_differential(self, member, downline_member, purchase_amount):
+        """
+        Calculate commission based purely on position percentage difference
+        """
+        member_percentage = member.position.discount_percentage
+        downline_percentage = downline_member['position_percentage']
+        
+        # Only calculate if member's percentage is higher
+        if member_percentage <= downline_percentage:
+            return Decimal('0.00')
+        
+        # Calculate difference percentage
+        difference_percentage = member_percentage - downline_percentage
+        
+        # Calculate commission amount based on differential model
+        commission_amount = (purchase_amount * difference_percentage) / 100
+        
+        return commission_amount
+    
+    def get_top_performers_differential(self, member, downline_by_level, limit=5):
+        """Get top performing downline members using differential model"""
+        try:
+            # Flatten downline data
+            all_downline = []
+            for level, members in downline_by_level.items():
+                for m in members:
+                    m['level'] = level
+                    all_downline.append(m)
+            
+            # Get user IDs
+            user_ids = [m['user_id'] for m in all_downline]
+            
+            if not user_ids:
+                return []
+            
+            # Get current month
+            today = timezone.now()
+            first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            # Calculate purchases for each downline member
+            user_purchases = {}
+            
+            current_month_orders = Order.objects.filter(
+                user_id__in=user_ids,
+                order_date__gte=first_day_current_month,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            )
+            
+            for order in current_month_orders:
+                if order.user_id not in user_purchases:
+                    user_purchases[order.user_id] = Decimal('0.00')
+                user_purchases[order.user_id] += order.final_amount
+            
+            # Calculate commissions based on differential model
+            user_commissions = {}
+            for user_id, purchase_amount in user_purchases.items():
+                downline_info = next((m for m in all_downline if m['user_id'] == user_id), None)
+                if downline_info:
+                    # Calculate commission using differential model
+                    commission = self.calculate_commission_differential(
+                        member, 
+                        downline_info, 
+                        purchase_amount
+                    )
+                    user_commissions[user_id] = {
+                        'purchase_amount': purchase_amount,
+                        'commission': commission,
+                        'downline_info': downline_info
+                    }
+            
+            # Sort by commission amount (highest first)
+            sorted_users = sorted(
+                user_commissions.items(),
+                key=lambda x: x[1]['commission'],
+                reverse=True
+            )[:limit]
+            
+            top_performers = []
+            for user_id, data in sorted_users:
+                if data['commission'] > 0:
+                    # Get MLM member object to access full details
+                    downline_member = MLMMember.objects.select_related('user', 'position').get(
+                        id=data['downline_info']['id']
+                    )
+                    
+                    top_performers.append({
+                        'member_id': downline_member.member_id,
+                        'name': f"{downline_member.user.first_name} {downline_member.user.last_name}",
+                        'level': data['downline_info']['level'],
+                        'position': downline_member.position.name,
+                        'position_percentage': str(downline_member.position.discount_percentage),
+                        'your_percentage': str(member.position.discount_percentage),
+                        'difference': str(member.position.discount_percentage - downline_member.position.discount_percentage),
+                        'total_purchases': str(data['purchase_amount']),
+                        'your_commission': str(data['commission'])
+                    })
+            
+            return top_performers
+            
+        except Exception as e:
+            logger.error(f"Error getting top performers: {str(e)}")
+            return []
+    
+    def get_recent_transactions_differential(self, member, downline_by_level, limit=10):
+        """Get recent transactions from downline members using differential model"""
+        try:
+            # Flatten downline data
+            all_downline = []
+            for level, members in downline_by_level.items():
+                for m in members:
+                    m['level'] = level
+                    all_downline.append(m)
+            
+            # Get user IDs
+            user_ids = [m['user_id'] for m in all_downline]
+            
+            if not user_ids:
+                return []
+            
+            # Get current month
+            today = timezone.now()
+            first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            
+            # Get recent orders
+            recent_orders = Order.objects.filter(
+                user_id__in=user_ids,
+                order_date__gte=first_day_current_month,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            ).select_related('user').order_by('-order_date')[:limit]
+            
+            transactions = []
+            for order in recent_orders:
+                # Find member details
+                downline_info = next((m for m in all_downline if m['user_id'] == order.user.id), None)
+                
+                if downline_info:
+                    # Calculate commission using differential model
+                    commission_amount = self.calculate_commission_differential(
+                        member,
+                        downline_info,
+                        order.final_amount
+                    )
+                    
+                    # Only include transactions that generate commission
+                    if commission_amount > 0:
+                        transactions.append({
+                            'date': order.order_date.isoformat(),
+                            'member_name': f"{order.user.first_name} {order.user.last_name}",
+                            'level': downline_info['level'],
+                            'order_id': order.order_number,
+                            'amount': str(order.final_amount),
+                            'your_percentage': str(member.position.discount_percentage),
+                            'their_percentage': str(downline_info['position_percentage']),
+                            'difference': str(member.position.discount_percentage - downline_info['position_percentage']),
+                            'your_commission': str(commission_amount)
+                        })
+            
+            return transactions
+            
+        except Exception as e:
+            logger.error(f"Error getting recent transactions: {str(e)}")
+            return []        
 
 class CommissionHistoryView(APIView):
     """
@@ -7353,7 +8104,7 @@ class CommissionHistoryView(APIView):
     
     def get(self, request):
         try:
-            # Ensure the user is an MLM member
+            # Ensure the user is an MLM member or admin
             if request.user.role != 'MLM_MEMBER' and request.user.role != 'ADMIN':
                 return Response({
                     'status': False,
