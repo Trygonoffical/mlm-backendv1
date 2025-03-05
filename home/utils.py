@@ -33,6 +33,7 @@ def update_bp_points_on_order(order):
                 return False
             # Add BP points from order to member
             old_bp = member.total_bp
+            
             member.total_bp += order.total_bp
             
             # Update monthly purchase amount
@@ -42,7 +43,7 @@ def update_bp_points_on_order(order):
             # Mark order as processed for BP
             order.bp_processed = True
             order.save(update_fields=['bp_processed'])
-            
+
             logger.info(f"Updated BP for {member.member_id}: {old_bp} → {member.total_bp}")
             
             # Check for position upgrade
@@ -55,7 +56,47 @@ def update_bp_points_on_order(order):
         logger.error(f"Error updating BP points on order {order.id}: {str(e)}")
         return False
 
+def reverse_bp_points_on_order_cancellation(order):
+    """
+    Reverse BP points and purchase amount when an order is cancelled
+    """
+    try:
+        # Only process cancelled orders
+        if order.status != 'CANCELLED':
+            return False
+            
+        # Get member if user is MLM member
+        if order.user.role != 'MLM_MEMBER':
+            return False
+            
+        member = order.user.mlm_profile
+        logger.info(f"Reversing BP update for member {member.member_id} from cancelled order {order.id}")
+        
+        with transaction.atomic():
+            # Check if order was processed for BP
+            if not hasattr(order, 'bp_processed') or not order.bp_processed:
+                logger.info(f"Order {order.id} was not processed for BP, skipping reversal")
+                return False
 
+            # Subtract BP points from order
+            old_bp = member.total_bp
+            member.total_bp -= order.total_bp
+            
+            # Subtract from monthly purchase amount
+            member.current_month_purchase -= order.final_amount
+            member.save()
+            
+            # Mark order as not processed for BP
+            order.bp_processed = False
+            order.save(update_fields=['bp_processed'])
+            
+            logger.info(f"Reversed BP for {member.member_id}: {old_bp} → {member.total_bp}")
+            
+            return True
+            
+    except Exception as e:
+        logger.error(f"Error reversing BP points on order cancellation {order.id}: {str(e)}")
+        return False
 # def calculate_monthly_commissions():
 #     """
 #     Calculate monthly commissions for all MLM members
