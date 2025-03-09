@@ -5,6 +5,9 @@ import json
 import logging
 from django.conf import settings
 from datetime import datetime
+from home.models import ShippingConfig
+from django.utils import timezone
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,21 @@ class QuixGoShippingService:
         self.password = settings.QUIXGO_PASSWORD
         self.customer_id = settings.QUIXGO_CUSTOMER_ID
         self.token = None
+
+        # Check if token exists in database and is valid
+        try:
+            config = ShippingConfig.objects.filter(
+                email=self.email
+            ).first()
+            
+            if config and config.access_token and not self.is_token_expired():
+                self.token = config.access_token
+            else:
+                # Token doesn't exist or is expired, get a new one
+                self.login()
+        except Exception as e:
+            logger.error(f"Error loading shipping config: {str(e)}")
+            self.token = None
     
     def login(self):
         """Log in to QuixGo API and get authentication token"""
@@ -41,14 +59,31 @@ class QuixGoShippingService:
             if response.status_code == 200:
                 data = response.json()
                 self.token = data.get('token')
+                
                 # Save customer ID if not already saved
                 if not self.customer_id:
                     self.customer_id = data.get('annotation_id')
+                
+                # Save token to database with expiry time (15 minutes from now)
+                expiry_time = timezone.now() + timezone.timedelta(minutes=15)
+                
+                ShippingConfig.objects.update_or_create(
+                    email=self.email,
+                    defaults={
+                        'access_token': self.token,
+                        'token_expiry': expiry_time,
+                        'customer_id': self.customer_id,
+                        'first_name': data.get('firstName'),
+                        'last_name': data.get('lastName'),
+                        'mobile': data.get('mobile')
+                    }
+                )
+                
                 return True
             else:
                 logger.error(f"QuixGo login failed: {response.text}")
                 return False
-                
+                    
         except Exception as e:
             logger.error(f"Error logging in to QuixGo: {str(e)}")
             return False
@@ -91,6 +126,24 @@ class QuixGoShippingService:
             'Content-Type': 'application/json'
         }
     
+    def is_token_expired(self):
+        """Check if the QuixGo token is expired or about to expire"""
+        try:
+            # Get the latest config
+            config = ShippingConfig.objects.filter(
+                email=self.email
+            ).first()
+            
+            if not config or not config.token_expiry:
+                return True
+                
+            # Consider token expired if less than 1 minute remaining
+            return config.token_expiry - timezone.now() < timezone.timedelta(minutes=1)
+            
+        except Exception as e:
+            logger.error(f"Error checking token expiry: {str(e)}")
+            return True  # Assume expired on error
+        
     def create_pickup_address(self, address_data):
         """Create a pickup address in QuixGo"""
         try:
@@ -300,7 +353,7 @@ class QuixGoShippingService:
                 'error': str(e)
             }
         
-        
+
     def get_pickup_addresses(self):
         """Fetch all pickup addresses for the customer from QuixGo"""
         if not self.token:

@@ -8115,3 +8115,51 @@ def test_shipping_connection(request):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+class CheckQuixGoTokenView(APIView):
+    """Check if the QuixGo token is valid and not expired"""
+    permission_classes = [IsAdminUser]
+    
+    def get(self, request):
+        try:
+            shipping_service = QuixGoShippingService()
+            is_valid = not shipping_service.is_token_expired()
+            
+            return Response({
+                'valid': is_valid
+            })
+        except Exception as e:
+            logger.error(f"Error checking token validity: {str(e)}")
+            return Response({
+                'valid': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class RefreshQuixGoTokenView(APIView):
+    """Force refresh of the QuixGo token"""
+    permission_classes = [IsAdminUser]
+    
+    def post(self, request):
+        try:
+            shipping_service = QuixGoShippingService()
+            success = shipping_service.login()
+            
+            if success:
+                return Response({
+                    'success': True,
+                    'message': 'Token refreshed successfully'
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'message': 'Failed to refresh token'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error refreshing token: {str(e)}")
+            return Response({
+                'success': False,
+                'message': f'Error refreshing token: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

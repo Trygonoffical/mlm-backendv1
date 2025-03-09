@@ -1654,18 +1654,18 @@ class CommissionActivationRequest(models.Model):
 
 
 
-class ShippingCredential(models.Model):
-    """Store API credentials for shipping providers"""
-    provider_name = models.CharField(max_length=100)  # E.g., 'QuixGo'
-    api_key = models.CharField(max_length=255)
-    api_secret = models.CharField(max_length=255, blank=True, null=True)
-    base_url = models.URLField()
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+# class ShippingCredential(models.Model):
+#     """Store API credentials for shipping providers"""
+#     provider_name = models.CharField(max_length=100)  # E.g., 'QuixGo'
+#     api_key = models.CharField(max_length=255)
+#     api_secret = models.CharField(max_length=255, blank=True, null=True)
+#     base_url = models.URLField()
+#     is_active = models.BooleanField(default=True)
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     updated_at = models.DateTimeField(auto_now=True)
 
-    def __str__(self):
-        return f"{self.provider_name} API"
+#     def __str__(self):
+#         return f"{self.provider_name} API"
 
 class PickupAddress(models.Model):
     """
@@ -1965,8 +1965,8 @@ class ShipmentStatusUpdate(models.Model):
 
 
 class ShippingConfig(models.Model):
-    email = models.EmailField(unique=True)
-    password = models.CharField(max_length=255)
+    email = models.EmailField(null=True, blank=True)
+    password = models.CharField(max_length=255 , blank=True, null=True)
     customer_id = models.CharField(max_length=50, blank=True, null=True)
     access_token = models.TextField(blank=True, null=True)
     token_expiry = models.DateTimeField(blank=True, null=True)
