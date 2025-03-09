@@ -13,11 +13,16 @@ class QuixGoShippingService:
     
     def __init__(self):
         # Get credentials from settings or database
-        self.api_base_url = settings.QUIXGO_API_BASE_URL  # e.g., 'https://dev.api.quixgo.com/clientApi'
+        # self.api_base_url = settings.QUIXGO_API_BASE_URL  # e.g., 'https://dev.api.quixgo.com/clientApi'
+        # self.email = settings.QUIXGO_EMAIL
+        # self.password = settings.QUIXGO_PASSWORD
+        # self.token = None
+        # self.customer_id = settings.QUIXGO_CUSTOMER_ID  # Save this after first login
+        self.api_base_url = settings.QUIXGO_API_BASE_URL
         self.email = settings.QUIXGO_EMAIL
         self.password = settings.QUIXGO_PASSWORD
+        self.customer_id = settings.QUIXGO_CUSTOMER_ID
         self.token = None
-        self.customer_id = settings.QUIXGO_CUSTOMER_ID  # Save this after first login
     
     def login(self):
         """Log in to QuixGo API and get authentication token"""
@@ -48,6 +53,34 @@ class QuixGoShippingService:
             logger.error(f"Error logging in to QuixGo: {str(e)}")
             return False
     
+    def test_connection(self):
+        """
+        Test connection to QuixGo API
+        
+        Returns:
+            dict: A dictionary with connection status and message
+        """
+        try:
+            # Attempt to log in
+            login_success = self.login()
+            
+            if login_success:
+                return {
+                    'success': True,
+                    'message': 'Successfully connected to QuixGo API'
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': 'Authentication failed'
+                }
+        
+        except Exception as e:
+            logger.error(f"Connection test error: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
     def get_auth_header(self):
         """Return authorization header with token"""
         if not self.token:
@@ -265,4 +298,30 @@ class QuixGoShippingService:
             return {
                 'success': False,
                 'error': str(e)
+            }
+        
+        
+    def get_pickup_addresses(self):
+        """Fetch all pickup addresses for the customer from QuixGo"""
+        if not self.token:
+            self.login()
+            
+        url = f"{self.api_base_url}/address/getByCustomerId/B2C"
+        
+        response = requests.get(
+            url, 
+            headers=self.get_auth_header()
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'success': True,
+                'addresses': data.get('addresses', [])
+            }
+        else:
+            logger.error(f"Failed to fetch pickup addresses: {response.text}")
+            return {
+                'success': False,
+                'error': response.text
             }

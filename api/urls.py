@@ -1,9 +1,10 @@
-from home.views import config
+# from home.views import config
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import path , include
+
 from rest_framework.routers import DefaultRouter
-from appAuth.views import GenerateOTP , VerifyOTP , UserLogin , RefreshToken , ValidateTokenView , CustomTokenRefreshView , HomeSliderViewSet , CategoryViewSet , ProductViewSet , PositionViewSet , MLMMemberViewSet , TestimonialViewSet , AdvertisementViewSet , SuccessStoryViewSet , CustomerPickViewSet , CompanyInfoViewSet , AboutViewSet , HomeSectionViewSet , MenuViewSet , CustomPageViewSet , KYCDocumentViewSet , BlogViewSet , CreateOrderView, VerifyPaymentView , AddressViewSet , CustomerProfileView , OrderProcessView , PaymentWebhookView , download_invoice , OrderViewSet , WalletViewSet, WalletTransactionViewSet, WithdrawalRequestViewSet , NotificationViewSet , AdminOrderListView , UpdateOrderStatusView , MLMOrderListView , MLMMemberTreeView , MLMMemberDetailsView , MLMReportView , MLMDashboardView , AdminDashboardView , MLMMemberRegistrationView , DownlineListView , ContactViewSet , NewsletterViewSet , MLMLiveCommissionView , AdminCustomerViewSet , OrderTrackingView , CheckUsernameView , UpdateStockView , CheckStockAvailabilityView , OrderCancellationView , RequestPasswordResetView , ProcessPasswordResetView , PasswordResetRequestListView , MLMProfileView , CommissionActivationRequestViewSet ,PickupAddressViewSet , ShipmentViewSet , MLMMemberReportsView , LiveCommissionDashboardView , CalculateCommissionsView , CommissionHistoryView
+from appAuth.views import GenerateOTP , VerifyOTP , UserLogin , RefreshToken , ValidateTokenView , CustomTokenRefreshView , HomeSliderViewSet , CategoryViewSet , ProductViewSet , PositionViewSet , MLMMemberViewSet , TestimonialViewSet , AdvertisementViewSet , SuccessStoryViewSet , CustomerPickViewSet , CompanyInfoViewSet , AboutViewSet , HomeSectionViewSet , MenuViewSet , CustomPageViewSet , KYCDocumentViewSet , BlogViewSet , CreateOrderView, VerifyPaymentView , AddressViewSet , CustomerProfileView , OrderProcessView , PaymentWebhookView , download_invoice , OrderViewSet , WalletViewSet, WalletTransactionViewSet, WithdrawalRequestViewSet , NotificationViewSet , AdminOrderListView , UpdateOrderStatusView , MLMOrderListView , MLMMemberTreeView , MLMMemberDetailsView , MLMReportView , MLMDashboardView , AdminDashboardView , MLMMemberRegistrationView , DownlineListView , ContactViewSet , NewsletterViewSet , MLMLiveCommissionView , AdminCustomerViewSet , OrderTrackingView , CheckUsernameView , UpdateStockView , CheckStockAvailabilityView , OrderCancellationView , RequestPasswordResetView , ProcessPasswordResetView , PasswordResetRequestListView , MLMProfileView , CommissionActivationRequestViewSet ,PickupAddressViewSet , ShipmentViewSet , MLMMemberReportsView , LiveCommissionDashboardView , CalculateCommissionsView , CommissionHistoryView , ShippingConfigView , OrderShippingView , ShippingDashboardView , test_shipping_connection
 
 
 router = DefaultRouter()
@@ -35,10 +36,16 @@ router.register(r'newsletters', NewsletterViewSet ,basename='newsletters' )
 router.register(r'admin/customers', AdminCustomerViewSet, basename='admin-customers')
 router.register(r'commission-activation-requests', CommissionActivationRequestViewSet, basename='commission-activation-request')
 router.register(r'pickup-addresses', PickupAddressViewSet , basename='pickup-addresses')
-router.register(r'shipments', ShipmentViewSet , basename='shipments')
+# router.register(r'shipments', ShipmentViewSet , basename='shipments')
+# router.register(r'shipping/pickup-addresses', PickupAddressViewSet, basename='pickup-address')
+# router.register(r'shipping/shipments', ShipmentViewSet, basename='shipment')
+# router.register(r'shipping/config', ShippingConfigView, basename='shipping-config')
+
+router.register(r'pickup-addresses', PickupAddressViewSet, basename='pickup-address')
+router.register(r'shipments', ShipmentViewSet, basename='shipment')
 
 urlpatterns = [
-    path('config/', config),
+#     path('config/', config),
     path('generate-otp/', GenerateOTP.as_view(), name='generate-otp'),
     path('verify-otp/', VerifyOTP.as_view(), name='verify-otp'),
 
@@ -147,6 +154,24 @@ urlpatterns = [
 
     path('mlm/member-reports/', MLMMemberReportsView.as_view(), name='mlm-member-reports'),
    
+
+#    path('shipping/config/test-connection/', 
+#          ShippingConfigView.as_view({'post': 'test_connection'}), 
+#          name='test-shipping-connection'),
+
+# Shipping configuration
+    path('config/', ShippingConfigView.as_view(), name='shipping-config'),
+#     path('config/test/', ShippingConfigView.as_view(actions={'post': 'test_connection'}), name='test-shipping-connection'),
+    path('config/test/', test_shipping_connection, name='test-shipping-connection'),
+    # Order shipping
+    path('orders/<int:order_id>/', OrderShippingView.as_view(), name='order-shipping'),
+    
+    # Dashboard
+    path('shipping/dashboard/', ShippingDashboardView.as_view(), name='shipping-dashboard'),
+    
+
+#     path('shipping/config/', ShippingConfigView.as_view(), name='shipping-config'),
+#     path('shipping/config/test-connection/', ShippingConfigView.as_view({"post": "test_connection"}), name='test-shipping-connection'),
     # path('kyc-documents/bank-details/', 
     #  KYCDocumentViewSet.as_view({'get': 'bank_details', 'post': 'bank_details', 'put': 'bank_details'}), 
     #  name='kyc-bank-details'),

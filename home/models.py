@@ -321,10 +321,16 @@ class Order(models.Model):
         DELIVERED = 'DELIVERED', 'Delivered'
         CANCELLED = 'CANCELLED', 'Cancelled'
 
+    class OrderType(models.TextChoices):
+        ONLINE = 'ONLINE', 'Online'
+        COD = 'COD', 'Cod'
+        
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
     order_number = models.CharField(max_length=50, unique=True)
     order_date = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=OrderStatus.choices, default=OrderStatus.PENDING)
+    orderType = models.CharField(max_length=20, choices=OrderType.choices, default=OrderType.ONLINE)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     
@@ -1662,29 +1668,104 @@ class ShippingCredential(models.Model):
         return f"{self.provider_name} API"
 
 class PickupAddress(models.Model):
-    """Store pickup addresses for shipping"""
-    name = models.CharField(max_length=100)
-    address_id = models.CharField(max_length=20, blank=True, null=True)  # QuixGo address ID
-    customer_id = models.CharField(max_length=20, blank=True, null=True)  # QuixGo customer ID
-    contact_person = models.CharField(max_length=100)
-    address_line1 = models.CharField(max_length=255)
-    address_line2 = models.CharField(max_length=255, blank=True)
-    city = models.CharField(max_length=100)
-    state = models.CharField(max_length=100)
-    country = models.CharField(max_length=100, default='India')
-    pincode = models.CharField(max_length=10)
-    phone = models.CharField(max_length=15)
-    alternate_phone = models.CharField(max_length=15, blank=True)
-    email = models.EmailField(blank=True)
-    landmark = models.CharField(max_length=255, blank=True)
-    address_type = models.CharField(max_length=20, default='Office')  # Home, Office, Warehouse
-    is_default = models.BooleanField(default=False)
-    is_active = models.BooleanField(default=True)
+    """
+    Store pickup addresses for shipping
+    Each address is registered with QuixGo and stored locally
+    """
+    # Basic Info
+    name = models.CharField(
+        max_length=100,
+        help_text="Name for this pickup point"
+    )
+    address_id = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="QuixGo address ID"
+    )
+    customer_id = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="QuixGo customer ID"
+    )
+    
+    # Contact Details
+    contact_person = models.CharField(
+        max_length=100,
+        help_text="Contact person name"
+    )
+    address_line1 = models.CharField(
+        max_length=255,
+        help_text="Address line 1"
+    )
+    address_line2 = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Address line 2 (optional)"
+    )
+    city = models.CharField(
+        max_length=100,
+        help_text="City"
+    )
+    state = models.CharField(
+        max_length=100,
+        help_text="State"
+    )
+    country = models.CharField(
+        max_length=100,
+        default='India',
+        help_text="Country"
+    )
+    pincode = models.CharField(
+        max_length=10,
+        help_text="PIN code"
+    )
+    phone = models.CharField(
+        max_length=15,
+        help_text="Contact phone"
+    )
+    alternate_phone = models.CharField(
+        max_length=15,
+        blank=True,
+        help_text="Alternate phone (optional)"
+    )
+    email = models.EmailField(
+        blank=True,
+        help_text="Email (optional)"
+    )
+    landmark = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Landmark (optional)"
+    )
+    
+    # Additional Info
+    address_type = models.CharField(
+        max_length=20,
+        default='Office',
+        help_text="Address type (Home, Office, Warehouse)"
+    )
+    is_default = models.BooleanField(
+        default=False,
+        help_text="Use as default pickup address"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Address is active and available for use"
+    )
+    
+    # Tracking
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        verbose_name = "Pickup Address"
+        verbose_name_plural = "Pickup Addresses"
+        ordering = ['-is_default', 'name']
+
     def __str__(self):
-        return f"{self.name} - {self.pincode}"
+        return f"{self.name} - {self.city}, {self.pincode}"
     
     def save(self, *args, **kwargs):
         # Set as default if it's the first pickup address
@@ -1697,8 +1778,11 @@ class PickupAddress(models.Model):
             
         super().save(*args, **kwargs)
 
+
 class Shipment(models.Model):
     """Track shipments for orders"""
+    
+    # Shipment status choices
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('BOOKED', 'Booked'),
@@ -1711,40 +1795,193 @@ class Shipment(models.Model):
         ('CANCELLED', 'Cancelled'),
     ]
     
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='shipments')
-    pickup_address = models.ForeignKey(PickupAddress, on_delete=models.PROTECT)
-    awb_number = models.CharField(max_length=50, blank=True, null=True)
-    shipment_id = models.CharField(max_length=50, blank=True, null=True)  # QuixGo shipment ID
-    courier_name = models.CharField(max_length=50, blank=True, null=True)  # DLV, DTC, SFX
-    service_type = models.CharField(max_length=10, default='SF')  # Express (EXP) or Surface (SF)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
-    status_details = models.JSONField(default=dict, blank=True)
-    tracking_url = models.URLField(blank=True, null=True)
-    weight = models.DecimalField(max_digits=5, decimal_places=2, default=1.0)
-    length = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
-    width = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
-    height = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
-    is_cod = models.BooleanField(default=False)
-    cod_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
-    shipping_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0.0)
-    is_cancelled = models.BooleanField(default=False)
+    # Relationships
+    order = models.ForeignKey(
+        'Order',
+        on_delete=models.CASCADE,
+        related_name='shipments',
+        help_text="Order being shipped"
+    )
+    pickup_address = models.ForeignKey(
+        'PickupAddress',
+        on_delete=models.PROTECT,
+        help_text="Pickup address for this shipment"
+    )
+    
+    # Shipment identifiers
+    awb_number = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="AWB tracking number"
+    )
+    shipment_id = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="QuixGo shipment ID"
+    )
+    
+    # Shipment details
+    courier_name = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Courier service provider (DLV, DTC, SFX)"
+    )
+    service_type = models.CharField(
+        max_length=10,
+        default='SF',
+        help_text="Service type (Express=EXP or Surface=SF)"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='PENDING',
+        help_text="Current status of the shipment"
+    )
+    status_details = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional status details as JSON"
+    )
+    tracking_url = models.URLField(
+        blank=True,
+        null=True,
+        help_text="URL for tracking this shipment"
+    )
+    
+    # Shipment specifications
+    weight = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=1.0,
+        help_text="Weight in kg"
+    )
+    length = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=10.0,
+        help_text="Length in cm"
+    )
+    width = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=10.0,
+        help_text="Width in cm"
+    )
+    height = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=10.0,
+        help_text="Height in cm"
+    )
+    
+    # Payment details
+    is_cod = models.BooleanField(
+        default=False,
+        help_text="Whether this is a Cash on Delivery shipment"
+    )
+    cod_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.0,
+        help_text="COD amount to be collected"
+    )
+    shipping_charge = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.0,
+        help_text="Shipping charge for this shipment"
+    )
+    
+    # Status flags
+    is_cancelled = models.BooleanField(
+        default=False,
+        help_text="Whether this shipment has been cancelled"
+    )
+    
+    # Tracking
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Shipment"
+        verbose_name_plural = "Shipments"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['order', 'status']),
+            models.Index(fields=['awb_number']),
+        ]
+
+    def __str__(self):
+        return f"Shipment {self.awb_number or 'pending'} for Order {self.order.order_number}"
+    
+    def get_status_display_custom(self):
+        """Get a custom status display name"""
+        for code, display in self.STATUS_CHOICES:
+            if code == self.status:
+                return display
+        return self.status
+
+
+class ShipmentStatusUpdate(models.Model):
+    """Track shipment status updates"""
+    
+    shipment = models.ForeignKey(
+        'Shipment',
+        on_delete=models.CASCADE,
+        related_name='status_updates',
+        help_text="Related shipment"
+    )
+    status = models.CharField(
+        max_length=50,
+        help_text="Status name"
+    )
+    status_details = models.TextField(
+        blank=True,
+        help_text="Status details or comments"
+    )
+    location = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Location of the status update"
+    )
+    timestamp = models.DateTimeField(
+        help_text="When this status was updated"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Shipment Status Update"
+        verbose_name_plural = "Shipment Status Updates"
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['shipment', 'timestamp']),
+        ]
+
+    def __str__(self):
+        return f"{self.status} at {self.timestamp.strftime('%Y-%m-%d %H:%M')}"
+
+
+class ShippingConfig(models.Model):
+    email = models.EmailField(unique=True)
+    password = models.CharField(max_length=255)
+    customer_id = models.CharField(max_length=50, blank=True, null=True)
+    access_token = models.TextField(blank=True, null=True)
+    token_expiry = models.DateTimeField(blank=True, null=True)
+    
+    # Optional additional fields
+    first_name = models.CharField(max_length=100, blank=True, null=True)
+    last_name = models.CharField(max_length=100, blank=True, null=True)
+    mobile = models.CharField(max_length=15, blank=True, null=True)
+    
+    # Default shipping preferences
+    default_courier = models.CharField(max_length=10, default='DTC')
+    default_service_type = models.CharField(max_length=10, default='SF')
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Shipment {self.awb_number} for Order {self.order.order_number}"
-
-class ShipmentStatusUpdate(models.Model):
-    """Track shipment status updates"""
-    shipment = models.ForeignKey(Shipment, on_delete=models.CASCADE, related_name='status_updates')
-    status = models.CharField(max_length=50)
-    status_details = models.TextField(blank=True)
-    location = models.CharField(max_length=100, blank=True)
-    timestamp = models.DateTimeField()
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['-timestamp']
-
-    def __str__(self):
-        return f"{self.status} at {self.timestamp.strftime('%Y-%m-%d %H:%M')}"
+        return f"{self.email} API"

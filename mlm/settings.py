@@ -223,9 +223,9 @@ RAZORPAY_KEY_SECRET = '47qySM0t0VJeRl1V1xMlVcP1'
 
 # shipping settings
 QUIXGO_API_BASE_URL = 'https://dev.api.quixgo.com/clientApi'  # Use prod URL for production
-QUIXGO_EMAIL = 'your-email@example.com'  # Replace with your QuixGo account email
-QUIXGO_PASSWORD = 'your-password'  # Replace with your QuixGo account password
-QUIXGO_CUSTOMER_ID = 'your-customer-id'  # This will be obtained after the first login
+QUIXGO_EMAIL = 'dharampal@quixgo.in'  # Replace with your QuixGo account email
+QUIXGO_PASSWORD = 'Test@123'  # Replace with your QuixGo account password
+QUIXGO_CUSTOMER_ID = '9y2J'  # This will be obtained after the first login
 
 
 MSG91_EMAIL_AUTH_KEY = '440929ANN27nHYNBZ67badd81P1'

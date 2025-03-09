@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress 
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate 
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -17,7 +17,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer , CommissionActivationRequestSerializer ,ShipmentSerializer , PickupAddressSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer , CommissionActivationRequestSerializer ,ShipmentSerializer , PickupAddressSerializer , ShippingConfigSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -202,181 +202,7 @@ class GenerateOTP(APIView):
                 'status': False,
                 'message': 'Unexpected error occurred'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    # def validate_phone_number(self, phone_number):
-    #     """Validate phone number format"""
-    #     if not phone_number:
-    #         return False, "Phone number is required"
-    #     if not phone_number.isdigit():
-    #         return False, "Phone number should contain only digits"
-    #     if not (10 <= len(phone_number) <= 12):
-    #         return False, "Phone number should be 10-12 digits long"
-    #     return True, "Valid phone number"
     
-
-    # def post(self, request):
-    #     try:
-    #         phone_number = request.data.get('phone_number')
-
-    #         # Validate phone number
-    #         is_valid, message = self.validate_phone_number(phone_number)
-    #         if not is_valid:
-    #             return Response({
-    #                 'status': False,
-    #                 'message': message
-    #             }, status=status.HTTP_400_BAD_REQUEST)
-
-    #         try:
-    #             # Check if user exists and is not a customer
-    #             user = User.objects.filter(phone_number=phone_number).first()
-    #             if user and user.role != 'CUSTOMER':
-    #                 return Response({
-    #                     'status': False,
-    #                     'message': 'This number is registered as a non-customer user'
-    #                 }, status=status.HTTP_400_BAD_REQUEST)
-
-    #             # Initialize MSG91 service
-    #             msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
-
-    #             # Generate 6 digit OTP
-    #             otp = str(random.randint(100000, 999999))
-
-    #             # Send OTP via MSG91
-    #             send_result = msg91_service.send_otp(phone_number, otp)
-
-    #             # Check if OTP sending was successful
-    #             if not send_result['success']:
-    #                 return Response({
-    #                     'status': False,
-    #                     'message': f'Failed to send OTP: {send_result["message"]}'
-    #                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    #             # Save or update OTP
-    #             phone_otp, created = PhoneOTP.objects.get_or_create(
-    #                 phone_number=phone_number,
-    #                 defaults={'otp': otp}
-    #             )
-
-    #             if not created:
-    #                 # Check if blocked period has expired
-    #                 phone_otp.reset_if_expired()
-                    
-    #                 # Check if still blocked
-    #                 if phone_otp.is_blocked():
-    #                     minutes_left = 30 - ((timezone.now() - phone_otp.last_attempt).seconds // 60)
-    #                     return Response({
-    #                         'status': False,
-    #                         'message': f'Maximum OTP attempts reached. Please try again after {minutes_left} minutes.'
-    #                     }, status=status.HTTP_400_BAD_REQUEST)
-
-    #                 phone_otp.otp = otp
-    #                 phone_otp.is_verified = False
-    #                 phone_otp.count += 1
-    #                 phone_otp.save()
-
-    #             return Response({
-    #                 'status': True,
-    #                 'message': 'OTP sent successfully',
-    #                 'attempts_left': 5 - phone_otp.count,
-    #                 'otp': otp  # Remove in production
-    #             })
-
-    #         except Exception as e:
-    #             logger.error(f"Error in GenerateOTP: {str(e)}")
-    #             return Response({
-    #                 'status': False,
-    #                 'message': 'Internal server error'
-    #             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    #     except Exception as e:
-    #         logger.error(f"Unexpected error in GenerateOTP: {str(e)}")
-    #         return Response({
-    #             'status': False,
-    #             'message': 'Unexpected error occurred'
-    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    # def post(self, request):
-    #     phone_number = request.data.get('phone_number')
-
-    #     # Validate phone number
-    #     is_valid, message = self.validate_phone_number(phone_number)
-    #     if not is_valid:
-    #         return Response({
-    #             'status': False,
-    #             'message': message
-    #         }, status=status.HTTP_400_BAD_REQUEST)
-
-    #     try:
-    #         # Check if user exists and is not a customer
-    #         user = User.objects.filter(phone_number=phone_number).first()
-    #         if user and user.role != 'CUSTOMER':
-    #             return Response({
-    #                 'status': False,
-    #                 'message': 'This number is registered as a non-customer user'
-    #             }, status=status.HTTP_400_BAD_REQUEST)
-
-    #         # Generate 6 digit OTP
-    #         otp = str(random.randint(100000, 999999))
-
-    #         # Save or update OTP
-    #         phone_otp, created = PhoneOTP.objects.get_or_create(
-    #             phone_number=phone_number,
-    #             defaults={'otp': otp}
-    #         )
-
-    #         if not created:
-    #             # Check if blocked period has expired
-    #             phone_otp.reset_if_expired()
-                
-    #             # Check if still blocked
-    #             if phone_otp.is_blocked():
-    #                 minutes_left = 30 - ((timezone.now() - phone_otp.last_attempt).seconds // 60)
-    #                 return Response({
-    #                     'status': False,
-    #                     'message': f'Maximum OTP attempts reached. Please try again after {minutes_left} minutes.'
-    #                 }, status=status.HTTP_400_BAD_REQUEST)
-
-    #             phone_otp.otp = otp
-    #             phone_otp.is_verified = False
-    #             phone_otp.count += 1
-    #             phone_otp.save()
-
-    #         # Initialize MSG91 service
-    #         msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
-
-    #         # Send OTP via MSG91
-    #         send_result = msg91_service.send_otp(phone_number, otp)
-    #         # Send OTP via SMS
-    #         # success, message = send_otp_sms(phone_number, otp)
-
-    #         if not send_result['success']:
-    #             return Response({
-    #                 'status': False,
-    #                 'message': f'Failed to send OTP: {send_result["message"]}'
-    #             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    #         # Save or update OTP
-    #         # phone_otp, created = PhoneOTP.objects.get_or_create(
-    #         #     phone_number=phone_number,
-    #         #     defaults={'otp': otp}
-    #         # )
-    #         # if success:
-    #         #     return Response({
-    #         #         'status': True,
-    #         #         'message': 'OTP sent successfully',
-    #         #         'attempts_left': 5 - phone_otp.count,
-    #         #         'otp': otp  # Remove in production
-    #         #     })
-    #         # else:
-    #         #     return Response({
-    #         #         'status': False,
-    #         #         'message': f'Failed to send OTP: {message}'
-    #         #     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    #     except Exception as e:
-    #         logger.error(f"Error in GenerateOTP: {str(e)}")
-    #         return Response({
-    #             'status': False,
-    #             'message': 'Internal server error'
-    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class VerifyOTP(APIView):
@@ -1389,66 +1215,6 @@ class AboutViewSet(viewsets.ModelViewSet):
             'is_active': about.is_active
         })
     
-
-# class HomeSectionViewSet(viewsets.ModelViewSet):
-#     queryset = HomeSection.objects.all()
-#     serializer_class = HomeSectionSerializer
-#     authentication_classes = [JWTAuthentication]
-#     permission_classes = [IsAuthenticated]
-
-#     def get_permissions(self):
-#         if self.request.method == 'GET':
-#             return [AllowAny()]
-#         return [IsAdminUser()]
-
-#     def get_queryset(self):
-#         queryset = HomeSection.objects.all()
-#         section_type = self.request.query_params.get('section_type', None)
-#         if section_type:
-#             queryset = queryset.filter(section_type=section_type)
-#         return queryset.order_by('display_order')
-
-#     @action(detail=True, methods=['post'])
-#     def toggle_status(self, request, pk=None):
-#         section = self.get_object()
-#         section.is_active = not section.is_active
-#         section.save()
-#         serializer = self.get_serializer(section)
-#         return Response(serializer.data)
-
-#     @action(detail=True, methods=['post'])
-#     def update_display_order(self, request, pk=None):
-#         section = self.get_object()
-#         new_order = request.data.get('display_order')
-        
-#         if new_order is None:
-#             return Response(
-#                 {'detail': 'display_order is required'},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         try:
-#             new_order = int(new_order)
-#         except (TypeError, ValueError):
-#             return Response(
-#                 {'detail': 'display_order must be a valid integer'},
-#                 status=status.HTTP_400_BAD_REQUEST
-#             )
-
-#         section.display_order = new_order
-#         section.save()
-#         serializer = self.get_serializer(section)
-#         return Response(serializer.data)
-
-#     @action(detail=False, methods=['get'])
-#     def section_types(self, request):
-#         return Response({
-#             'types': [
-#                 {'value': choice[0], 'label': choice[1]}
-#                 for choice in HomeSectionType.choices
-#             ]
-#         })
-
 class HomeSectionViewSet(viewsets.ModelViewSet):
     queryset = HomeSection.objects.all()
     serializer_class = HomeSectionSerializer
@@ -1723,12 +1489,6 @@ class KYCDocumentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-    # def perform_create(self, serializer):
-    #     if self.request.user.role == 'MLM_MEMBER':
-    #         # Set the MLM member to the current user's MLM profile
-    #         serializer.save(mlm_member=self.request.user.mlm_profile)
-    #     else:
-    #         serializer.save()
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
@@ -1766,48 +1526,7 @@ class KYCDocumentViewSet(viewsets.ModelViewSet):
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    # @action(detail=True, methods=['post'])
-    # def verify(self, request, pk=None):
-    #     try:
-    #         if request.user.role != 'ADMIN':
-    #             return Response(
-    #                 {"error": "Only admin can verify documents"}, 
-    #                 status=status.HTTP_403_FORBIDDEN
-    #             )
-    #         document = self.get_object()
-    #         verification_status = request.data.get('status')
-    #         rejection_reason = request.data.get('rejection_reason', '')
-
-    #         if verification_status not in ['VERIFIED', 'REJECTED']:
-    #             return Response(
-    #                 {"error": "Invalid status"},
-    #                 status=status.HTTP_400_BAD_REQUEST
-    #             )
-
-    #         document.status = verification_status
-    #         document.verified_by = request.user
-    #         document.verification_date = timezone.now()
-
-    #         if verification_status == 'REJECTED':
-    #             if not rejection_reason:
-    #                 return Response(
-    #                     {"error": "Rejection reason is required"},
-    #                     status=status.HTTP_400_BAD_REQUEST
-    #                 )
-    #             document.rejection_reason = rejection_reason
-
-    #         document.save()
-            
-    #         # Send notification to MLM member about the verification
-    #         # You can implement this part based on your notification system
-            
-    #         return Response(self.get_serializer(document).data)
-            
-    #     except Exception as e:
-    #         return Response(
-    #             {"error": str(e)},
-    #             status=status.HTTP_400_BAD_REQUEST
-    #         )
+    
     
     @action(detail=True, methods=['post'])
     def verify(self, request, pk=None):
@@ -2141,94 +1860,7 @@ class VerifyPaymentView(APIView):
                 'status': 'error',
                 'message': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
-    # def post(self, request):
-    #     try:
-
-    #         # Log the incoming request data
-    #         logger.info(f"Verify Payment Request Data: {request.data}")
-
-    #         # Get payment details
-    #         payment_id = request.data.get('razorpay_payment_id')
-    #         order_id = request.data.get('razorpay_order_id')
-    #         signature = request.data.get('razorpay_signature')
-    #         update_stock = request.data.get('update_stock', False)
-
-    #         # Additional logging
-    #         logger.info(f"Payment ID: {payment_id}")
-    #         logger.info(f"Order ID: {order_id}")
-
-    #         # # Get payment details
-    #         # payment_id = request.data.get('razorpay_payment_id')
-    #         # order_id = request.data.get('razorpay_order_id')
-    #         # signature = request.data.get('razorpay_signature')
-
-    #         # Get the order
-    #         order = Order.objects.get(razorpay_order_id=order_id)
-
-    #         # Initialize Razorpay client
-    #         client = razorpay.Client(
-    #             auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
-    #         )
-
-    #         # Verify signature
-    #         params_dict = {
-    #             'razorpay_payment_id': payment_id,
-    #             'razorpay_order_id': order_id,
-    #             'razorpay_signature': signature
-    #         }
-            
-    #         try:
-    #             client.utility.verify_payment_signature(params_dict)
-                
-    #             # Update order status
-    #             order.status = 'CONFIRMED'
-    #             order.payment_id = payment_id
-    #             order.save()
-
-    #             # Send order confirmation SMS
-    #             send_order_confirmation_sms(order)
-
-    #             # If user is MLM member, update BP points
-    #             if request.user.role == 'MLM_MEMBER':
-    #                 mlm_member = request.user.mlm_profile
-    #                 mlm_member.total_bp += order.total_bp
-    #                 mlm_member.current_month_purchase += order.final_amount
-    #                 # Check for position upgrade
-    #                 mlm_member.check_position_upgrade()
-    #                 mlm_member.save()
-
-    #                 # Check for position upgrade
-    #                 # mlm_member.check_position_upgrade()
-    #             # Update product stock if requested
-    #             if update_stock:
-    #                 for item in order.items.all():
-    #                     product = item.product
-    #                     if product.stock >= item.quantity:
-    #                         product.stock -= item.quantity
-    #                         product.save()
-    #                         logger.info(f"Updated stock for product {product.id}, new stock: {product.stock}")
-    #                     else:
-    #                         logger.warning(f"Insufficient stock for product {product.id}: requested {item.quantity}, available {product.stock}")
-    #                         # We still proceed with the order even if stock is insufficient
-    #                         # This is to avoid issues with the customer who already paid
-    #                         product.stock = 0  # Set to zero instead of negative
-    #                         product.save()
-
-    #             return Response({
-    #                 'status': 'success',
-    #                 'message': 'Payment verified successfully',
-    #                 'order_id': order.id
-    #             })
-    #         except Exception as e:
-    #             order.status = 'FAILED'
-    #             order.save()
-    #             raise e
-
-    #     except Exception as e:
-    #         return Response({
-    #             'status': 'error',
-    #             'message': str(e)
-    #         }, status=status.HTTP_400_BAD_REQUEST)
+    
         
     def send_order_confirmation_sms(self, order):
         """Send order confirmation SMS using MSG91"""
@@ -2259,17 +1891,7 @@ class VerifyPaymentView(APIView):
                 
         except Exception as e:
             logger.error(f"Error sending order confirmation SMS: {str(e)}")
-    # def send_order_confirmation_sms(order):
-    #     msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
-    #     message = f"Dear User, your order {order.order_number} has been confirmed. Delivery by {order.expected_delivery_date}. For details, visit https://www.yourwebsite.com/OrderTracking"
-        
-    #     result = msg91_service.send_transactional_sms(
-    #         order.user.phone_number, 
-    #         message
-    #     )
-        
-    #     if not result['success']:
-    #         logger.error(f"Failed to send order confirmation SMS: {result['message']}")    
+       
 
 class AddressViewSet(viewsets.ModelViewSet):
     serializer_class = AddressSerializer
@@ -3013,73 +2635,7 @@ class WithdrawalRequestViewSet(viewsets.ModelViewSet):
             )
 
 # ------------------ Notification -----------------------
-# class NotificationViewSet(viewsets.ModelViewSet):
-#     serializer_class = NotificationSerializer
-#     permission_classes = [IsAuthenticated]
 
-#     def get_queryset(self):
-#         user = self.request.user
-#         if user.role == 'ADMIN':
-#             return Notification.objects.all().order_by('-created_at')
-#         else:
-#             # Get the MLM member ID for the current user
-#             mlm_member = user.mlm_profile  # Assuming you have this related_name set up
-
-#             return Notification.objects.filter(
-#                 Q(recipient=mlm_member.id) | Q(notification_type='GENERAL', recipient__isnull=True)
-#             ).order_by('-created_at')
-
-#     def perform_create(self, serializer):
-#         logger.info(f"Creating notification: {serializer.validated_data}")
-#         if self.request.user.role != 'ADMIN':
-#             raise PermissionError("Only admin can create notifications")
-            
-#         notification_type = serializer.validated_data.get('notification_type')
-#         recipient = serializer.validated_data.get('recipient')
-        
-#         # For individual notifications, ensure recipient is set
-#         if notification_type == 'INDIVIDUAL' and not recipient:
-#             raise serializers.ValidationError({
-#                 'recipient': 'Recipient is required for individual notifications'
-#             })
-        
-#         # For general notifications, ensure recipient is None
-#         if notification_type == 'GENERAL':
-#             serializer.validated_data['recipient'] = None
-            
-#         serializer.save()
-
-#     @action(detail=True, methods=['POST'])
-#     def mark_read(self, request, pk=None):
-#         notification = self.get_object()
-#         # Allow marking as read if it's a general notification or if user is the recipient
-#         if notification.notification_type != 'GENERAL' and notification.recipient != request.user:
-#             return Response(
-#                 {"error": "Cannot mark other user's notification as read"},
-#                 status=status.HTTP_403_FORBIDDEN
-#             )
-        
-#         notification.mark_as_read()
-#         return Response({"status": "success"})
-
-#     @action(detail=False, methods=['POST'])
-#     def mark_all_read(self, request):
-#         user = request.user
-#         notifications = Notification.objects.filter(
-#             Q(recipient=user) | Q(notification_type='GENERAL', recipient__isnull=True),
-#             is_read=False
-#         )
-#         notifications.update(is_read=True, read_at=timezone.now())
-#         return Response({"status": "success"})
-
-#     @action(detail=False, methods=['GET'])
-#     def unread_count(self, request):
-#         user = request.user
-#         count = Notification.objects.filter(
-#             Q(recipient=user) | Q(notification_type='GENERAL', recipient__isnull=True),
-#             is_read=False
-#         ).count()
-#         return Response({"count": count})
     
 class NotificationViewSet(viewsets.ModelViewSet):
     serializer_class = NotificationSerializer
@@ -3416,56 +2972,6 @@ class MLMOrderListView(APIView):
         return Response(serializer.data)
     
 
-# class MLMMemberTreeView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request):
-#         # Determine the base member for the tree view
-#         if request.user.role == 'ADMIN':
-#             # Admin sees entire tree, starting from root
-#             base_member = MLMMember.objects.filter(sponsor__isnull=True).first()
-#         elif request.user.role == 'MLM_MEMBER':
-#             # MLM member sees their own downline
-#             base_member = request.user.mlm_profile
-#         else:
-#             return Response({
-#                 'error': 'Unauthorized access'
-#             }, status=status.HTTP_403_FORBIDDEN)
-
-#         # If no base member found, return empty tree
-#         if not base_member:
-#             return Response({
-#                 'message': 'No member tree available',
-#                 'tree': []
-#             })
-
-#         # Recursive function to build member tree
-#         def build_member_tree(member):
-#             # Get direct referrals
-#             referrals = MLMMember.objects.filter(sponsor=member)
-            
-#             member_data = {
-#                 'id': member.id,
-#                 'member_id': member.member_id,
-#                 'name': member.user.get_full_name() or member.user.username,
-#                 'email': member.user.email,
-#                 'phone_number': member.user.phone_number,
-#                 'position_name': member.position.name if member.position else None,
-#                 'is_active': member.is_active,
-#                 'total_earnings': float(member.total_earnings),
-#                 'total_bp': member.total_bp,
-#                 'referral_count': referrals.count(),
-#                 'children': [build_member_tree(referral) for referral in referrals]
-#             }
-            
-#             return member_data
-
-#         # Build and return the tree
-#         tree = build_member_tree(base_member)
-        
-#         return Response({
-#             'tree': tree
-#         })
 class MLMMemberTreeView(APIView):
     """
     API endpoint to get MLM member hierarchy tree or forest
@@ -4008,249 +3514,6 @@ class MLMMemberDetailsView(APIView):
     #         for commission in recent_commissions
         # ]
 
-
-# class MLMReportView(APIView):
-#     permission_classes = [IsAdminUser]
-
-#     def get(self, request):
-#         # Get report type from query parameters
-#         report_type = request.query_params.get('type', '')
-        
-#         # Common filtering parameters
-#         start_date = request.query_params.get('start_date')
-#         end_date = request.query_params.get('end_date')
-        
-#         try:
-#             if report_type == 'level_wise':
-#                 return self.generate_level_wise_report(start_date, end_date)
-            
-#             elif report_type == 'joining':
-#                 period = request.query_params.get('period', 'daily')
-#                 return self.generate_joining_report(period, start_date, end_date)
-            
-#             elif report_type == 'member_search':
-#                 return self.generate_member_search_report(request.query_params)
-            
-#             elif report_type == 'custom':
-#                 return self.generate_custom_report(request.query_params)
-            
-#             else:
-#                 return Response({
-#                     'error': 'Invalid report type'
-#                 }, status=status.HTTP_400_BAD_REQUEST)
-        
-#         except Exception as e:
-#             logger.error(f"Error generating report: {e}")
-#             return Response({
-#                 'error': 'Failed to generate report',
-#                 'details': str(e)
-#             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-#     def generate_level_wise_report(self, start_date=None, end_date=None):
-#         # Base queryset with optional date filtering
-#         queryset = MLMMember.objects.select_related('position', 'user')
-        
-#         if start_date:
-#             queryset = queryset.filter(join_date__date__gte=start_date)
-#         if end_date:
-#             queryset = queryset.filter(join_date__date__lte=end_date)
-        
-#         # Group by position and aggregate data
-#         level_report = queryset.values(
-#             'position__name'
-#         ).annotate(
-#             total_members=Count('id'),
-#             total_earnings=Sum('total_earnings'),
-#             total_bp=Sum('total_bp'),
-#             avg_monthly_purchase=Avg('current_month_purchase')
-#         ).order_by('position__level_order')
-        
-#         return Response({
-#             'report_type': 'level_wise',
-#             'data': list(level_report)
-#         })
-
-#     def generate_joining_report(self, period='daily', start_date=None, end_date=None):
-#         # Base queryset
-#         queryset = MLMMember.objects.select_related('user')
-        
-#         # Date filtering
-#         if start_date:
-#             queryset = queryset.filter(join_date__date__gte=start_date)
-#         if end_date:
-#             queryset = queryset.filter(join_date__date__lte=end_date)
-        
-#         # Period-based grouping
-#         if period == 'daily':
-#             queryset = queryset.annotate(
-#                 period=TruncDay('join_date')
-#             )
-#         elif period == 'weekly':
-#             queryset = queryset.annotate(
-#                 period=TruncWeek('join_date')
-#             )
-#         elif period == 'monthly':
-#             queryset = queryset.annotate(
-#                 period=TruncMonth('join_date')
-#             )
-#         else:
-#             return Response({
-#                 'error': 'Invalid period'
-#             }, status=status.HTTP_400_BAD_REQUEST)
-        
-#         # Aggregate joining data
-#         joining_report = queryset.values(
-#             'period'
-#         ).annotate(
-#             total_members=Count('id'),
-#             total_bp=Sum('total_bp'),
-#             total_earnings=Sum('total_earnings')
-#         ).order_by('period')
-        
-#         return Response({
-#             'report_type': 'joining',
-#             'period': period,
-#             'data': list(joining_report)
-#         })
-
-#     def generate_member_search_report(self, params):
-#         # Search parameters
-#         name = params.get('name')
-#         city = params.get('city')
-#         state = params.get('state')
-        
-#         # Base queryset
-#         queryset = MLMMember.objects.select_related('user')
-        
-#         # Apply filters
-#         if name:
-#             queryset = queryset.filter(
-#                 Q(user__first_name__icontains=name) | 
-#                 Q(user__last_name__icontains=name)
-#             )
-        
-#         # For city and state, you might need to adjust based on your exact model structure
-#         if city or state:
-#             # Option 1: If address is a related model
-#             queryset = queryset.filter(
-#                 Q(user__address__city__icontains=city) if city else Q(),
-#                 Q(user__address__state__icontains=state) if state else Q()
-#             )
-        
-#         # Serialize member data
-#         report_data = [{
-#             'member_id': member.member_id,
-#             'name': member.user.get_full_name(),
-#             'email': member.user.email,
-#             'phone': member.user.phone_number,
-#             'position': member.position.name if member.position else None,
-#             'total_earnings': float(member.total_earnings),
-#             'total_bp': member.total_bp,
-#             'join_date': member.join_date,
-#             # Careful address handling
-#             'city': (member.user.address.city if hasattr(member.user, 'address') and hasattr(member.user.address, 'city') else None),
-#             'state': (member.user.address.state if hasattr(member.user, 'address') and hasattr(member.user.address, 'state') else None)
-#         } for member in queryset]
-        
-#         return Response({
-#             'report_type': 'member_search',
-#             'total_count': len(report_data),
-#             'data': report_data
-#         })
-
-#     def generate_custom_report(self, params):
-#         # More flexible custom reporting
-#         queryset = MLMMember.objects.select_related('user', 'position')
-        
-#         # Possible custom filters with type hints and validation
-#         filter_options = {
-#             'min_earnings': {
-#                 'field': 'total_earnings',
-#                 'lookup': 'gte',
-#                 'type': float
-#             },
-#             'max_earnings': {
-#                 'field': 'total_earnings',
-#                 'lookup': 'lte',
-#                 'type': float
-#             },
-#             'min_bp': {
-#                 'field': 'total_bp',
-#                 'lookup': 'gte',
-#                 'type': int
-#             },
-#             'max_bp': {
-#                 'field': 'total_bp',
-#                 'lookup': 'lte',
-#                 'type': int
-#             },
-#             'position': {
-#                 'field': 'position__name',
-#                 'lookup': 'iexact',
-#                 'type': str
-#             },
-#             'is_active': {
-#                 'field': 'is_active',
-#                 'lookup': 'exact',
-#                 'type': bool
-#             },
-#             'min_current_purchase': {
-#                 'field': 'current_month_purchase',
-#                 'lookup': 'gte',
-#                 'type': float
-#             },
-#             'max_current_purchase': {
-#                 'field': 'current_month_purchase',
-#                 'lookup': 'lte',
-#                 'type': float
-#             },
-#             'sponsor_member_id': {
-#                 'field': 'sponsor__member_id',
-#                 'lookup': 'iexact',
-#                 'type': str
-#             }
-#         }
-        
-#         # Dynamic filter application
-#         filter_kwargs = {}
-        
-#         for param, value in params.items():
-#             if param in filter_options:
-#                 try:
-#                     # Convert value to appropriate type
-#                     converted_value = filter_options[param]['type'](value)
-                    
-#                     # Construct filter key
-#                     filter_key = f"{filter_options[param]['field']}__{filter_options[param]['lookup']}"
-#                     filter_kwargs[filter_key] = converted_value
-#                 except (ValueError, TypeError):
-#                     # Skip invalid filters
-#                     continue
-        
-#         # Apply filters
-#         queryset = queryset.filter(**filter_kwargs)
-        
-#         # Prepare report data
-#         report_data = [{
-#             'member_id': member.member_id,
-#             'name': member.user.get_full_name(),
-#             'email': member.user.email,
-#             'phone': member.user.phone_number,
-#             'position': member.position.name if member.position else None,
-#             'is_active': member.is_active,
-#             'total_earnings': float(member.total_earnings),
-#             'total_bp': member.total_bp,
-#             'current_month_purchase': float(member.current_month_purchase),
-#             'sponsor_member_id': member.sponsor.member_id if member.sponsor else None,
-#             'join_date': member.join_date
-#         } for member in queryset]
-        
-#         return Response({
-#             'report_type': 'custom',
-#             'total_count': len(report_data),
-#             'filter_applied': list(filter_kwargs.keys()),
-#             'data': report_data
-#         })
 class MLMReportView(APIView):
     permission_classes = [IsAdminUser]
 
@@ -5200,139 +4463,6 @@ class AdminDashboardView(APIView):
             return []
 
 
-
-
-# class MLMMemberRegistrationView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def post(self, request):
-#         try:
-#             # Validate current user is an MLM member
-#             if request.user.role != 'MLM_MEMBER':
-#                 return Response({
-#                     'error': 'Only MLM members can register new members'
-#                 }, status=status.HTTP_403_FORBIDDEN)
-
-#             # Get current MLM member (sponsor)
-#             current_member = MLMMember.objects.get(user=request.user)
-
-#             # Extract document related data
-#             documents = request.FILES.getlist('document_file')
-#             document_types = request.POST.getlist('document_types[]')
-#             document_numbers = {}
-            
-#             # Process document numbers from the request
-#             for doc_type in ['AADHAR', 'PAN', 'BANK_STATEMENT', 'CANCELLED_CHEQUE']:
-#                 if doc_type in request.POST:
-#                     document_numbers[doc_type] = request.POST.get(doc_type)
-
-#             # Create context with document data
-#             serializer_context = {
-#                 'document_types': document_types,
-#                 'document_numbers': document_numbers
-#             }
-
-#             # Validate input data
-#             serializer = MLMMemberRegistrationSerializer(
-#                 data=request.POST,
-#                 context=serializer_context
-#             )
-
-#             if not serializer.is_valid():
-#                 return Response({
-#                     'error': 'Invalid registration data',
-#                     'details': serializer.errors
-#                 }, status=status.HTTP_400_BAD_REQUEST)
-
-#             # Create new user
-#             new_user = User.objects.create_user(
-#                 username=self.generate_unique_username(serializer.validated_data['phone_number']),
-#                 password=serializer.validated_data['password'],
-#                 phone_number=serializer.validated_data['phone_number'],
-#                 first_name=serializer.validated_data['first_name'],
-#                 last_name=serializer.validated_data.get('last_name', ''),
-#                 email=serializer.validated_data.get('email', ''),
-#                 role='MLM_MEMBER'
-#             )
-
-#             try:
-#                 # Create MLM Member
-#                 new_mlm_member = MLMMember.objects.create(
-#                     user=new_user,
-#                     sponsor=current_member,
-#                     position=self.determine_position(current_member),
-#                     member_id=self.generate_member_id(),
-#                     is_active=True,
-#                     join_date=timezone.now()
-#                 )
-
-#                 # Process KYC Documents
-#                 kyc_docs_list = []
-#                 for doc, doc_type in zip(documents, document_types):
-#                     try:
-#                         kyc_doc = KYCDocument.objects.create(
-#                             mlm_member=new_mlm_member,
-#                             document_file=doc,
-#                             document_type=doc_type,
-#                             document_number=document_numbers.get(doc_type, ''),
-#                             status='PENDING'
-#                         )
-#                         kyc_docs_list.append(kyc_doc)
-#                     except Exception as doc_error:
-#                         logger.error(f"Error creating KYC document: {str(doc_error)}")
-#                         # Cleanup
-#                         new_user.delete()
-#                         new_mlm_member.delete()
-#                         for doc in kyc_docs_list:
-#                             doc.delete()
-#                         raise Exception(f"Failed to create KYC document: {str(doc_error)}")
-
-#                 # Create notification
-#                 Notification.objects.create(
-#                     title='New MLM Member Registration',
-#                     message=f'New member {new_user.get_full_name()} registered by {current_member.user.get_full_name()}',
-#                     notification_type='SYSTEM'
-#                 )
-
-#                 return Response({
-#                     'status': 'success',
-#                     'message': 'Member registered successfully',
-#                     'member_details': {
-#                         'member_id': new_mlm_member.member_id,
-#                         'username': new_user.username,
-#                         'full_name': new_user.get_full_name(),
-#                         'email': new_user.email,
-#                         'phone': new_user.phone_number,
-#                         'sponsor': current_member.member_id,
-#                         'position': new_mlm_member.position.name
-#                     }
-#                 })
-
-#             except Exception as e:
-#                 logger.error(f"Error in member creation: {str(e)}")
-#                 if 'new_user' in locals():
-#                     new_user.delete()
-#                 raise
-
-#         except Exception as e:
-#             logger.error(f"MLM Member Registration Error: {str(e)}")
-#             return Response({
-#                 'error': str(e)
-#             }, status=status.HTTP_400_BAD_REQUEST)
-
-#     def generate_unique_username(self, phone_number):
-#         base_username = f"MLM_{phone_number}"
-#         unique_suffix = str(uuid.uuid4())[:8]
-#         return f"{base_username}_{unique_suffix}"
-
-#     def generate_member_id(self):
-#         while True:
-#             member_id = f"MLM{random.randint(10000, 99999)}"
-#             if not MLMMember.objects.filter(member_id=member_id).exists():
-#                 return member_id
-
-#     def determine_position(self, sponsor):
-#         return sponsor.position
 class MLMMemberRegistrationView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -7787,73 +6917,6 @@ class MLMMemberReportsView(APIView):
         return str(period)
 
 
-# class LiveCommissionDashboardView(APIView):
-#     """
-#     API endpoint to show real-time commission calculations and forecasts 
-#     for MLM members based on current month performance
-#     """
-#     authentication_classes = [JWTAuthentication]
-#     permission_classes = [IsAuthenticated]
-    
-#     def get(self, request):
-#         try:
-#             # Ensure the user is an MLM member
-#             if request.user.role != 'MLM_MEMBER':
-#                 return Response({
-#                     'status': False,
-#                     'message': 'Only MLM members can access this dashboard'
-#                 }, status=status.HTTP_403_FORBIDDEN)
-                
-#             # Get the MLM member profile
-#             member = request.user.mlm_profile
-            
-#             # Check if the member has an active position that can earn commissions
-#             if not member.position.can_earn_commission:
-#                 return Response({
-#                     'status': False,
-#                     'message': 'Your current position cannot earn commissions. Please upgrade to a higher position.'
-#                 }, status=status.HTTP_403_FORBIDDEN)
-                
-#             # Import the function to get live commission data
-#             from home.utils import get_live_commission_data
-            
-#             # Get commission data
-#             commission_data = get_live_commission_data(member)
-            
-#             # Get current month and calculation dates
-#             today = timezone.now()
-#             current_month = today.strftime('%B %Y')
-            
-#             # Determine next commission calculation date
-#             first_day_next_month = (today.replace(day=28) + timezone.timedelta(days=4)).replace(day=1)
-#             next_calculation_date = first_day_next_month.strftime('%d %B %Y')
-            
-#             # Determine next withdrawal availability date
-#             if today.day < 15:
-#                 # If we're before the 15th, next withdrawal is on the 15th
-#                 next_withdrawal_date = today.replace(day=15).strftime('%d %B %Y')
-#             else:
-#                 # If we're on or after the 15th, next withdrawal is on the 15th of next month
-#                 next_withdrawal_date = first_day_next_month.replace(day=15).strftime('%d %B %Y')
-                
-#             # Add additional info to the response
-#             response_data = {
-#                 'status': True,
-#                 'current_month': current_month,
-#                 'next_calculation_date': next_calculation_date,
-#                 'next_withdrawal_date': next_withdrawal_date,
-#                 'commission_data': commission_data
-#             }
-            
-#             return Response(response_data)
-            
-#         except Exception as e:
-#             logger.error(f"Error in LiveCommissionDashboardView: {str(e)}")
-#             return Response({
-#                 'status': False,
-#                 'message': 'An error occurred while loading the commission dashboard',
-#                 'error': str(e)
-#             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class LiveCommissionDashboardView(APIView):
     """
@@ -8447,3 +7510,608 @@ class CalculateCommissionsView(APIView):
                 'message': 'An error occurred while calculating commissions',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+
+class ShippingConfigView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request):
+        """Save shipping configuration and attempt login"""
+        serializer = ShippingConfigSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            try:
+                # Attempt login to QuixGo
+                response = requests.post(
+                    'https://dev.api.quixgo.com/clientApi/login', 
+                    json={
+                        'email': serializer.validated_data['email'],
+                        'password': serializer.validated_data['password']
+                    }
+                )
+                
+                if response.status_code == 200:
+                    login_data = response.json()
+                    
+                    # Create or update shipping config
+                    config, created = ShippingConfig.objects.update_or_create(
+                        email=serializer.validated_data['email'],
+                        defaults={
+                            'password': serializer.validated_data['password'],
+                            'customer_id': login_data.get('annotation_id'),
+                            'access_token': login_data.get('token'),
+                            'token_expiry': timezone.now() + timedelta(hours=10),
+                            'first_name': login_data.get('firstName'),
+                            'last_name': login_data.get('lastName'),
+                            'mobile': login_data.get('mobile')
+                        }
+                    )
+                    
+                    return Response({
+                        'success': True,
+                        'message': 'Configuration saved and authenticated',
+                        'customer_id': config.customer_id,
+                        'config': config
+
+                    })
+                else:
+                    return Response({
+                        'success': False,
+                        'message': 'Authentication failed'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            except Exception as e:
+                return Response({
+                    'success': False,
+                    'message': str(e)
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    def get(self, request):
+        """Retrieve shipping configuration"""
+        try:
+            config = ShippingConfig.objects.get(email=request.user.email)
+            serializer = ShippingConfigSerializer(config)
+            return Response(serializer.data)
+        except ShippingConfig.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'No shipping configuration found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+class PickupAddressListView(APIView):
+    permission_classes = [IsAdminUser]
+    
+    def get(self, request):
+        """Get all pickup addresses from QuixGo"""
+        try:
+            service = QuixGoShippingService()
+            result = service.get_pickup_addresses()
+            
+            if result['success']:
+                return Response({
+                    'success': True,
+                    'addresses': result['addresses']
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'message': 'Failed to fetch pickup addresses',
+                    'error': result.get('error')
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            logger.error(f"Error fetching pickup addresses: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'An error occurred',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+# class PickupAddressViewSet(viewsets.ModelViewSet):
+#     def create(self, request):
+#         """Create pickup address directly"""
+#         serializer = PickupAddressSerializer(data=request.data)
+        
+#         if serializer.is_valid():
+#             try:
+#                 # Get shipping config for token
+#                 config = ShippingConfig.objects.get(email=request.user.email)
+                
+#                 # Prepare payload for QuixGo
+#                 payload = {
+#                     "pickupName": serializer.validated_data.get('name'),
+#                     "customerId": config.customer_id,
+#                     "cpPerson": serializer.validated_data.get('contact_person'),
+#                     "address1": serializer.validated_data.get('address_line1'),
+#                     "address2": serializer.validated_data.get('address_line2', ''),
+#                     "city": serializer.validated_data.get('city'),
+#                     "state": serializer.validated_data.get('state'),
+#                     "country": serializer.validated_data.get('country', 'India'),
+#                     "addressType": serializer.validated_data.get('address_type', 'Office'),
+#                     "pincode": serializer.validated_data.get('pincode'),
+#                     "cpMobile": serializer.validated_data.get('phone'),
+#                     "alternateNumber": serializer.validated_data.get('alternate_phone', ''),
+#                     "email": serializer.validated_data.get('email', ''),
+#                     "landmark": serializer.validated_data.get('landmark', '')
+#                 }
+                
+#                 # Send request to QuixGo
+#                 response = requests.post(
+#                     'https://dev.api.quixgo.com/clientApi/addPickupPoint',
+#                     headers={
+#                         'Content-Type': 'application/json',
+#                         'Authorization': config.access_token
+#                     },
+#                     json=payload
+#                 )
+                
+#                 if response.status_code == 200:
+#                     # Save to our database
+#                     quixgo_response = response.json()
+#                     pickup_address = serializer.save(
+#                         address_id=quixgo_response.get('addressId'),
+#                         customer_id=config.customer_id
+#                     )
+                    
+#                     return Response({
+#                         'success': True,
+#                         'data': PickupAddressSerializer(pickup_address).data
+#                     }, status=status.HTTP_201_CREATED)
+#                 else:
+#                     return Response({
+#                         'success': False,
+#                         'message': 'Failed to create pickup address in QuixGo'
+#                     }, status=status.HTTP_400_BAD_REQUEST)
+            
+#             except ShippingConfig.DoesNotExist:
+#                 return Response({
+#                     'success': False,
+#                     'message': 'No shipping configuration found'
+#                 }, status=status.HTTP_400_BAD_REQUEST)
+        
+#         return Response({
+#             'success': False,
+#             'errors': serializer.errors
+#         }, status=status.HTTP_400_BAD_REQUEST)
+
+class ShipmentViewSet(viewsets.ModelViewSet):
+    queryset = Shipment.objects.all()
+    serializer_class = ShipmentSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_permissions(self):
+        """Set permissions based on action"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'cancel']:
+            return [IsAdminUser()]
+        return super().get_permissions()
+    
+    def get_queryset(self):
+        """Filter shipments based on user role"""
+        user = self.request.user
+        if user.role == 'ADMIN':
+            queryset = Shipment.objects.all()
+        else:
+            queryset = Shipment.objects.filter(order__user=user)
+            
+        # Apply filters
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+            
+        order_id = self.request.query_params.get('order_id')
+        if order_id:
+            queryset = queryset.filter(order_id=order_id)
+            
+        return queryset.order_by('-created_at')
+
+    def create(self, request):
+        """Book a shipment"""
+        serializer = ShipmentSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            try:
+                # Get shipping config
+                config = ShippingConfig.objects.get(email=request.user.email)
+                
+                # Get order and pickup address
+                order = serializer.validated_data.get('order')
+                pickup_address = serializer.validated_data.get('pickup_address')
+                
+                # Prepare payload for QuixGo
+                payload = [{
+                    "deliveryAddress": {
+                        "name": order.user.get_full_name(),
+                        "address1": order.shipping_address,
+                        "city": order.shipping_city,
+                        "state": order.shipping_state,
+                        "pincode": order.shipping_pincode,
+                        "mobile": order.user.phone_number,
+                        "addressType": "Home"
+                    },
+                    "pickupAddress": {
+                        "addressId": pickup_address.address_id,
+                        "customerId": config.customer_id,
+                        "addressType": pickup_address.address_type,
+                        "cpPerson": pickup_address.contact_person,
+                        "address1": pickup_address.address_line1,
+                        "city": pickup_address.city,
+                        "state": pickup_address.state,
+                        "pincode": pickup_address.pincode,
+                        "cpMobile": pickup_address.phone
+                    },
+                    "productDetails": {
+                        "weight": str(serializer.validated_data.get('weight', 1)),
+                        "invoice": str(int(order.final_amount)),
+                        "productName": "Order Products",
+                        "quantity": "1",
+                        "orderNumber": order.order_number
+                    },
+                    "serviceProvider": config.default_courier,
+                    "serviceType": config.default_service_type,
+                    "paymentMode": "COD" if order.orderType == "COD" else "Prepaid",
+                    "customerId": config.customer_id
+                }]
+                
+                # Send request to QuixGo
+                response = requests.post(
+                    'https://dev.api.quixgo.com/clientApi/v2/bookShipment',
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': config.access_token
+                    },
+                    json=payload
+                )
+                
+                if response.status_code == 200:
+                    # Process response and save shipment
+                    quixgo_response = response.json()[0]
+                    shipment = serializer.save(
+                        awb_number=quixgo_response.get('awbNumber'),
+                        courier_name=quixgo_response.get('shipmentPartner'),
+                        shipping_charge=quixgo_response.get('finalCharge')
+                    )
+                    
+                    return Response({
+                        'success': True,
+                        'data': ShipmentSerializer(shipment).data
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    return Response({
+                        'success': False,
+                        'message': 'Failed to book shipment'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            except ShippingConfig.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'message': 'No shipping configuration found'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'])
+    def track(self, request, pk=None):
+        """Track a shipment and update its status"""
+        shipment = self.get_object()
+        
+        if not shipment.awb_number:
+            return Response({
+                'success': False,
+                'message': 'No AWB number available for tracking'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        shipping_service = QuixGoShippingService()
+        quixgo_response = shipping_service.track_shipment(shipment.awb_number)
+        
+        if quixgo_response.get('success'):
+            # Update shipment status
+            current_status = quixgo_response.get('current_status')
+            
+            # Map QuixGo status to our status
+            status_mapping = {
+                'Booked': 'BOOKED',
+                'Picked Up': 'PICKED_UP',
+                'In Transit': 'IN_TRANSIT',
+                'Out For Delivery': 'OUT_FOR_DELIVERY',
+                'Delivered': 'DELIVERED',
+                'Undelivered': 'FAILED_DELIVERY',
+                'RTO': 'RETURNED',
+                'Cancelled': 'CANCELLED'
+            }
+            
+            # Update status if it exists in our mapping
+            if current_status in status_mapping:
+                shipment.status = status_mapping[current_status]
+            
+            # Update status details
+            shipment.status_details = {
+                'last_updated': timezone.now().isoformat(),
+                'quixgo_status': current_status,
+                'history': quixgo_response.get('status_history', [])
+            }
+            shipment.save()
+            
+            # Create status update entries for each new status
+            status_history = quixgo_response.get('status_history', [])
+            for status_entry in status_history:
+                # Get status timestamp if available
+                timestamp = timezone.now()
+                if 'updateDate' in status_entry and status_entry['updateDate']:
+                    try:
+                        timestamp = datetime.fromisoformat(status_entry['updateDate'].replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        pass
+                
+                # Create status update if it doesn't exist already
+                status_name = status_entry.get('statusName', 'Unknown')
+                
+                # Skip if we already have this status update
+                existing_status = ShipmentStatusUpdate.objects.filter(
+                    shipment=shipment,
+                    status=status_name,
+                    timestamp=timestamp
+                ).exists()
+                
+                if not existing_status:
+                    ShipmentStatusUpdate.objects.create(
+                        shipment=shipment,
+                        status=status_name,
+                        status_details=status_entry.get('comment', ''),
+                        location=status_entry.get('location', ''),
+                        timestamp=timestamp
+                    )
+            
+            # Update order status if needed
+            self.update_order_status(shipment)
+            
+            return Response({
+                'success': True,
+                'message': 'Shipment status updated',
+                'status': shipment.status,
+                'status_history': quixgo_response.get('status_history', [])
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': 'Failed to track shipment',
+                'error': quixgo_response.get('error')
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel a shipment"""
+        shipment = self.get_object()
+        
+        if not shipment.awb_number:
+            return Response({
+                'success': False,
+                'message': 'No AWB number available for cancellation'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        reason = request.data.get('reason', 'Order cancelled')
+        
+        shipping_service = QuixGoShippingService()
+        quixgo_response = shipping_service.cancel_shipment(shipment.awb_number, reason)
+        
+        if quixgo_response.get('success'):
+            # Update shipment status
+            shipment.status = 'CANCELLED'
+            shipment.is_cancelled = True
+            shipment.status_details = {
+                **shipment.status_details,
+                'cancelled_at': timezone.now().isoformat(),
+                'reason': reason
+            }
+            shipment.save()
+            
+            # Create status update
+            ShipmentStatusUpdate.objects.create(
+                shipment=shipment,
+                status='CANCELLED',
+                status_details=reason,
+                timestamp=timezone.now()
+            )
+            
+            # Update order status
+            order = shipment.order
+            if order.status not in ['DELIVERED', 'CANCELLED']:
+                order.status = 'CANCELLED'
+                order.save()
+            
+            return Response({
+                'success': True,
+                'message': 'Shipment cancelled successfully'
+            })
+        else:
+            return Response({
+                'success': False,
+                'message': 'Failed to cancel shipment',
+                'error': quixgo_response.get('error')
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    def update_order_status(self, shipment):
+        """Update the order status based on shipment status"""
+        order = shipment.order
+        
+        if shipment.status == 'DELIVERED':
+            order.status = 'DELIVERED'
+            order.save()
+        elif shipment.status == 'RETURNED':
+            order.status = 'RETURNED'
+            order.save()
+        elif shipment.status == 'CANCELLED' and order.status != 'DELIVERED':
+            order.status = 'CANCELLED'
+            order.save()
+
+class OrderShippingView(APIView):
+    """
+    API endpoint for customers to view their order's shipping details
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, order_id):
+        """Get shipping information for an order"""
+        try:
+            # Get the order (ensure it belongs to the current user unless admin)
+            if request.user.role == 'ADMIN':
+                order = get_object_or_404(Order, id=order_id)
+            else:
+                order = get_object_or_404(Order, id=order_id, user=request.user)
+            
+            # Get shipments for this order
+            shipments = Shipment.objects.filter(order=order)
+            
+            if not shipments.exists():
+                return Response({
+                    'success': True,
+                    'message': 'No shipping information available for this order',
+                    'order_status': order.status,
+                    'shipments': []
+                })
+            
+            # Get detailed shipment information
+            shipment_data = []
+            for shipment in shipments:
+                # Get status updates
+                status_updates = ShipmentStatusUpdate.objects.filter(
+                    shipment=shipment
+                ).order_by('-timestamp')
+                
+                shipment_info = {
+                    'id': shipment.id,
+                    'shipment_id': shipment.shipment_id,
+                    'awb_number': shipment.awb_number,
+                    'courier': shipment.courier_name,
+                    'status': shipment.status,
+                    'tracking_url': shipment.tracking_url,
+                    'created_at': shipment.created_at,
+                    'status_updates': [
+                        {
+                            'status': update.status,
+                            'details': update.status_details,
+                            'location': update.location,
+                            'timestamp': update.timestamp
+                        }
+                        for update in status_updates
+                    ]
+                }
+                
+                shipment_data.append(shipment_info)
+            
+            return Response({
+                'success': True,
+                'order_id': order.id,
+                'order_number': order.order_number,
+                'order_status': order.status,
+                'shipments': shipment_data
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting order shipping details: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Error retrieving shipping information',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ShippingDashboardView(APIView):
+    """
+    API endpoint for admins to get shipping dashboard statistics
+    """
+    permission_classes = [IsAdminUser]
+    
+    def get(self, request):
+        """Get shipping statistics for the dashboard"""
+        try:
+            # Get counts by status
+            status_counts = Shipment.objects.values('status').annotate(count=Count('id'))
+            status_stats = {item['status']: item['count'] for item in status_counts}
+            
+            # Get courier distribution
+            courier_counts = Shipment.objects.values('courier_name').annotate(count=Count('id'))
+            courier_stats = {item['courier_name']: item['count'] for item in courier_counts}
+            
+            # Get recent shipments
+            recent_shipments = Shipment.objects.select_related('order').order_by('-created_at')[:10]
+            recent_data = []
+            
+            for shipment in recent_shipments:
+                recent_data.append({
+                    'id': shipment.id,
+                    'awb_number': shipment.awb_number,
+                    'order_number': shipment.order.order_number,
+                    'courier': shipment.courier_name,
+                    'status': shipment.status,
+                    'created_at': shipment.created_at
+                })
+            
+            # Get pending shipment orders (orders that are confirmed but not shipped yet)
+            pending_orders = Order.objects.filter(
+                status='CONFIRMED'
+            ).exclude(
+                id__in=Shipment.objects.values('order_id')
+            ).order_by('-order_date')[:10]
+            
+            pending_data = []
+            for order in pending_orders:
+                pending_data.append({
+                    'id': order.id,
+                    'order_number': order.order_number,
+                    'order_date': order.order_date,
+                    'user_name': order.user.get_full_name(),
+                    'amount': float(order.final_amount)
+                })
+            
+            return Response({
+                'success': True,
+                'status_stats': status_stats,
+                'courier_stats': courier_stats,
+                'recent_shipments': recent_data,
+                'pending_orders': pending_data
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting shipping dashboard stats: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Error retrieving shipping statistics',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def test_shipping_connection(request):
+    """Test connection to QuixGo API"""
+    try:
+        # Try to login with provided credentials
+        shipping_service = QuixGoShippingService()
+        result = shipping_service.login()
+
+        if result:
+            return Response({
+                'success': True,
+                'message': 'Successfully connected to QuixGo API',
+                'customer_id': shipping_service.customer_id
+            })
+        else:
+            return Response({
+                'success': False,
+                'error': 'Authentication failed'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    except Exception as e:
+        logger.error(f"Connection test error: {str(e)}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

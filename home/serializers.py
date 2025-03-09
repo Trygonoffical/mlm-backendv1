@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag , CommissionActivationRequest , PickupAddress, Shipment, ShipmentStatusUpdate
+from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag , CommissionActivationRequest , PickupAddress, Shipment, ShipmentStatusUpdate , ShippingConfig
 from appAuth.serializers import UserSerializer
 from django.db import IntegrityError
 from django.db.models import Sum, Avg, Count, Min, Max
@@ -1515,56 +1515,6 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
         read_only_fields = ['processed_at', 'rejection_reason']
 
 
-# class NotificationSerializer(serializers.ModelSerializer):
-#     recipient_name = serializers.CharField(source='recipient.get_full_name', read_only=True)
-#     notification_type_display = serializers.CharField(source='get_notification_type_display', read_only=True)
-#     recipient = serializers.PrimaryKeyRelatedField(
-#         queryset=User.objects.filter(role='MLM_MEMBER'),
-#         required=False,
-#         allow_null=True
-#     )
-#     time_ago = serializers.SerializerMethodField()
-
-#     class Meta:
-#         model = Notification
-#         fields = [
-#             'id', 'title', 'message', 'notification_type', 
-#             'notification_type_display', 'recipient', 'recipient_name',
-#             'is_read', 'created_at', 'read_at', 'time_ago'
-#         ]
-#         read_only_fields = ['is_read', 'created_at', 'read_at']
-
-#     def get_time_ago(self, obj):
-#         from django.utils import timezone
-#         now = timezone.now()
-#         diff = now - obj.created_at
-
-#         if diff.days > 30:
-#             return obj.created_at.strftime("%b %d, %Y")
-#         elif diff.days > 0:
-#             return f"{diff.days} days ago"
-#         elif diff.seconds > 3600:
-#             hours = diff.seconds // 3600
-#             return f"{hours} hours ago"
-#         elif diff.seconds > 60:
-#             minutes = diff.seconds // 60
-#             return f"{minutes} minutes ago"
-#         else:
-#             return "Just now"
-
-#     def validate(self, data):
-#         # Validate notification type and recipient
-#         notification_type = data.get('notification_type')
-#         recipient = data.get('recipient')
-
-#         if notification_type == 'INDIVIDUAL' and not recipient:
-#             raise serializers.ValidationError({
-#                 'recipient': 'Recipient is required for individual notifications'
-#             })
-#         elif notification_type == 'GENERAL' and recipient:
-#             data['recipient'] = None  # Clear recipient for general notifications
-
-#         return data
     
 class NotificationSerializer(serializers.ModelSerializer):
     recipient_name = serializers.CharField(source='recipient.user.get_full_name', read_only=True)
@@ -1823,31 +1773,130 @@ class CommissionActivationRequestSerializer(serializers.ModelSerializer):
         return data
 
 
+class ShippingConfigSerializer(serializers.ModelSerializer):
+    """Serializer for ShippingConfig model"""
+    class Meta:
+        model = ShippingConfig
+        fields = [
+            'id', 'email', 'first_name', 'last_name',
+            'mobile', 'customer_id',
+            'default_courier', 'default_service_type', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['customer_id', 'created_at', 'updated_at']
+        
+    def validate_email(self, value):
+        """Validate email"""
+        if not value:
+            raise serializers.ValidationError("Email is required")
+        return value
+
 
 class PickupAddressSerializer(serializers.ModelSerializer):
+    """Serializer for PickupAddress model"""
     class Meta:
         model = PickupAddress
-        fields = '__all__'
+        fields = [
+            'id', 'name', 'address_id', 'customer_id', 'contact_person',
+            'address_line1', 'address_line2', 'city', 'state', 'country',
+            'pincode', 'phone', 'alternate_phone', 'email', 'landmark',
+            'address_type', 'is_default', 'is_active', 'created_at', 'updated_at'
+        ]
         read_only_fields = ['address_id', 'customer_id', 'created_at', 'updated_at']
+        
+    def validate(self, data):
+        """Validate address data"""
+        required_fields = ['name', 'contact_person', 'address_line1', 'city', 
+                           'state', 'pincode', 'phone']
+        
+        for field in required_fields:
+            if not data.get(field):
+                raise serializers.ValidationError(f"{field} is required")
+                
+        # Validate pincode format
+        pincode = data.get('pincode', '')
+        if not pincode.isdigit() or len(pincode) not in [5, 6]:
+            raise serializers.ValidationError("Pincode must be 5 or 6 digits")
+            
+        # Validate phone format
+        phone = data.get('phone', '')
+        if not phone.isdigit() or len(phone) < 10 or len(phone) > 12:
+            raise serializers.ValidationError("Phone number must be 10-12 digits")
+            
+        return data
+
+
+class ShipmentStatusUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for ShipmentStatusUpdate model"""
+    class Meta:
+        model = ShipmentStatusUpdate
+        fields = [
+            'id', 'shipment', 'status', 'status_details', 
+            'location', 'timestamp', 'created_at'
+        ]
+        read_only_fields = ['created_at']
+
 
 class ShipmentSerializer(serializers.ModelSerializer):
+    """Serializer for Shipment model"""
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    status_updates = ShipmentStatusUpdateSerializer(many=True, read_only=True)
+    tracking_link = serializers.SerializerMethodField()
     
     class Meta:
         model = Shipment
         fields = [
-            'id', 'order', 'pickup_address', 'awb_number', 'shipment_id', 
+            'id', 'order', 'pickup_address', 'awb_number', 'shipment_id',
             'courier_name', 'service_type', 'status', 'status_display', 
-            'tracking_url', 'weight', 'length', 'width', 'height', 
-            'is_cod', 'cod_amount', 'shipping_charge', 'created_at'
+            'status_details', 'tracking_url', 'tracking_link', 'weight', 
+            'length', 'width', 'height', 'is_cod', 'cod_amount', 
+            'shipping_charge', 'is_cancelled', 'created_at', 'updated_at',
+            'status_updates'
         ]
         read_only_fields = [
-            'awb_number', 'shipment_id', 'courier_name', 
-            'tracking_url', 'shipping_charge', 'created_at'
+            'awb_number', 'shipment_id', 'status_details', 'tracking_url',
+            'shipping_charge', 'created_at', 'updated_at', 'status_updates'
         ]
+        
+    def get_tracking_link(self, obj):
+        """Generate a tracking link based on the courier"""
+        if not obj.awb_number:
+            return None
+            
+        # Different tracking URLs for different couriers
+        if obj.courier_name == 'DTDC':
+            return f"https://tracking.dtdc.com/tracking/tracking_results.asp?ttrk={obj.awb_number}"
+        elif obj.courier_name == 'DELHIVERY':
+            return f"https://www.delhivery.com/track/?tracking_id={obj.awb_number}"
+        elif obj.courier_name == 'SHADOWFAX':
+            return f"https://shadowfax.in/track-order/{obj.awb_number}"
+        
+        # Return the tracking URL from the object if available
+        return obj.tracking_url
+    
+    def validate(self, data):
+        """Custom validation for shipment data"""
+        # Ensure order status is appropriate for shipping
+        order = data.get('order')
+        if order and order.status not in ['PENDING', 'CONFIRMED']:
+            raise serializers.ValidationError(
+                f"Cannot create shipment for order with status {order.status}"
+            )
+            
+        # Validate dimensions
+        for field in ['weight', 'length', 'width', 'height']:
+            value = data.get(field)
+            if value and value <= 0:
+                raise serializers.ValidationError(f"{field} must be positive")
+                
+        # Validate COD amount
+        is_cod = data.get('is_cod', False)
+        cod_amount = data.get('cod_amount', 0)
+        
+        if is_cod and cod_amount <= 0:
+            raise serializers.ValidationError("COD amount must be positive for COD shipments")
+            
+        if not is_cod and cod_amount > 0:
+            raise serializers.ValidationError("COD amount must be zero for non-COD shipments")
+            
+        return data
 
-class ShipmentStatusUpdateSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ShipmentStatusUpdate
-        fields = ['id', 'shipment', 'status', 'status_details', 'location', 'timestamp', 'created_at']
-        read_only_fields = ['created_at']

@@ -17,12 +17,12 @@ from .models import PhoneOTP , User , HomeSlider
 
 # Create your views here.
 
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def config(request):
-    if request.method == 'POST':
-        return Response(request.data)
-    return Response({"message": "Hello, vikas!"})
+# @api_view(['GET'])
+# @permission_classes([AllowAny])
+# def config(request):
+#     if request.method == 'POST':
+#         return Response(request.data)
+#     return Response({"message": "Hello, vikas!"})
 
 
 
