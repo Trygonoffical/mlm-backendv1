@@ -222,9 +222,9 @@ RAZORPAY_KEY_ID = 'rzp_test_x05a9xxCjRkVBx'
 RAZORPAY_KEY_SECRET = '47qySM0t0VJeRl1V1xMlVcP1'
 
 # shipping settings
-QUIXGO_API_BASE_URL = 'https://dev.api.quixgo.com/clientApi'  # Use prod URL for production
-QUIXGO_EMAIL = 'dharampal@quixgo.in'  # Replace with your QuixGo account email
-QUIXGO_PASSWORD = 'Test@123'  # Replace with your QuixGo account password
+QUIXGO_API_BASE_URL = 'https://api.quixgo.com/clientApi'  # Use prod URL for production
+QUIXGO_EMAIL = 'herbalpowerindia@gmail.com'  # Replace with your QuixGo account email dharampal@quixgo.in
+QUIXGO_PASSWORD = 'Herbal@1234'  # Replace with your QuixGo account password Test@123
 QUIXGO_CUSTOMER_ID = '9y2J'  # This will be obtained after the first login
 
 

@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag , CommissionActivationRequest , PickupAddress, Shipment, ShipmentStatusUpdate , ShippingConfig
+from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag , CommissionActivationRequest , PickupAddress, Shipment, ShipmentStatusUpdate , ShippingConfig , ShippingAddress
 from appAuth.serializers import UserSerializer
 from django.db import IntegrityError
 from django.db.models import Sum, Avg, Count, Min, Max
@@ -1448,10 +1448,15 @@ class OrderItemSerializer(serializers.ModelSerializer):
             'discount_percentage', 'discount_amount',
             'gst_amount', 'final_price', 'bp_points'
         ]
+class ShippingAddressSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShippingAddress
+        fields = ['name', 'street_address', 'city', 'state', 'postal_code']
 
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user = serializers.SerializerMethodField()
+    shipping_details = ShippingAddressSerializer(read_only=True)
     # Or use SerializerMethodField
     final_amount_display = serializers.SerializerMethodField()
 
@@ -1463,7 +1468,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'id', 'order_number', 'order_date', 'status',
             'total_amount', 'discount_amount', 'final_amount',
             'final_amount_display', 'shipping_address', 'billing_address', 'total_bp',
-            'items' ,'user'
+            'items' ,'user' , 'shipping_details'
         ]
     def get_user(self, obj):
         # Return a dictionary with user details

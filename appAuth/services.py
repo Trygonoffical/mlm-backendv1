@@ -239,7 +239,8 @@ class QuixGoShippingService:
                 "codAmount": shipment_data.get('cod_amount', 0) if shipment_data.get('is_cod', False) else 0,
                 "insuranceCharge": shipment_data.get('insurance_charge', 0),
                 "customerId": self.customer_id,
-                "serviceMode": "FW"  # Forward shipment
+                "serviceMode": "FW" , # Forward shipment
+                "bookingChannel": "web"
             }]
             
             response = requests.post(url, headers=self.get_auth_header(), json=payload)
@@ -358,23 +359,107 @@ class QuixGoShippingService:
         """Fetch all pickup addresses for the customer from QuixGo"""
         if not self.token:
             self.login()
-            
-        url = f"{self.api_base_url}/address/getByCustomerId/B2C"
+                
+        # Use the full URL directly to debug the issue
+        url = "https://api.quixgo.com/v1/address/getByCustomerId/B2C"
         
-        response = requests.get(
+        logger.info(f"Making request to URL: {url}")
+        
+        payload = {
+            "limit": 10,
+            "page": 1,
+            "filter": {
+                "customerId": self.customer_id,
+                "addressCategory": "pickup"
+            },
+            "sortBy": "createdAt",
+            "order": "desc"
+        }
+        
+        headers = self.get_auth_header()
+        headers['Content-Type'] = 'application/json'
+        
+        logger.info(f"Request payload: {payload}")
+        
+        response = requests.post(
             url, 
-            headers=self.get_auth_header()
+            headers=headers,
+            json=payload
         )
         
         if response.status_code == 200:
             data = response.json()
+            logger.info(f"QuixGo API Response: {data}")
             return {
                 'success': True,
-                'addresses': data.get('addresses', [])
+                'addresses': data.get('rows', [])
             }
         else:
-            logger.error(f"Failed to fetch pickup addresses: {response.text}")
+            logger.error(f"Failed to fetch pickup addresses: {response.status_code} - {response.text}")
             return {
                 'success': False,
                 'error': response.text
             }
+    # def get_pickup_addresses(self):
+    #     """Fetch all pickup addresses for the customer from QuixGo"""
+    #     if not self.token:
+    #         self.login()
+            
+    #     url = f"{self.api_base_url}/v1/address/getByCustomerId/B2C"
+        
+    #     # Create payload matching the curl command
+    #     payload = {
+    #         "limit": 10,
+    #         "page": 1,
+    #         "filter": {
+    #             "customerId": self.customer_id,
+    #             "addressCategory": "pickup"
+    #         },
+    #         "sortBy": "createdAt",
+    #         "order": "desc"
+    #     }
+        
+    #     # Send a POST request, not GET
+    #     response = requests.post(
+    #         url, 
+    #         headers=self.get_auth_header(),
+    #         json=payload
+    #     )
+        
+    #     if response.status_code == 200:
+    #         data = response.json()
+            
+    #         return {
+    #             'success': True,
+    #             'addresses': data.get('addresses', [])
+    #         }
+    #     else:
+    #         logger.error(f"Failed to fetch pickup addresses: {response.text}")
+    #         return {
+    #             'success': False,
+    #             'error': response.text
+    #         }
+    # def get_pickup_addresses(self):
+    #     """Fetch all pickup addresses for the customer from QuixGo"""
+    #     if not self.token:
+    #         self.login()
+            
+    #     url = f"{self.api_base_url}/address/getByCustomerId/B2C"
+        
+    #     response = requests.get(
+    #         url, 
+    #         headers=self.get_auth_header()
+    #     )
+        
+    #     if response.status_code == 200:
+    #         data = response.json()
+    #         return {
+    #             'success': True,
+    #             'addresses': data.get('addresses', [])
+    #         }
+    #     else:
+    #         logger.error(f"Failed to fetch pickup addresses: {response.text}")
+    #         return {
+    #             'success': False,
+    #             'error': response.text
+    #         }

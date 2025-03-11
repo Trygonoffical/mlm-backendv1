@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate 
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate , ShippingAddress
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -361,28 +361,50 @@ class RefreshToken(APIView):
     permission_classes = [AllowAny]
     
     def post(self, request):
-        refresh_token = request.data.get('refresh')
-        
-        if not refresh_token:
-            return Response({
-                'status': False,
-                'message': 'Refresh token is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
-            
         try:
-            refresh = RefreshToken(refresh_token)
+            shipping_service = QuixGoShippingService()
+            # Force a new login regardless of current token status
+            success = shipping_service.login()
             
-            return Response({
-                'status': True,
-                'message': 'Token refreshed successfully',
-                'token': str(refresh.access_token)
-            })
-            
+            if success:
+                return Response({
+                    'success': True,
+                    'message': 'Token refreshed successfully'
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'message': 'Failed to refresh token'
+                }, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            logger.error(f"Error refreshing token: {str(e)}")
             return Response({
-                'status': False,
-                'message': 'Invalid refresh token'
-            }, status=status.HTTP_401_UNAUTHORIZED)
+                'success': False,
+                'message': f'Error refreshing token: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    # def post(self, request):
+    #     refresh_token = request.data.get('refresh')
+        
+    #     if not refresh_token:
+    #         return Response({
+    #             'status': False,
+    #             'message': 'Refresh token is required'
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+            
+    #     try:
+    #         refresh = RefreshToken(refresh_token)
+            
+    #         return Response({
+    #             'status': True,
+    #             'message': 'Token refreshed successfully',
+    #             'token': str(refresh.access_token)
+    #         })
+            
+    #     except Exception as e:
+    #         return Response({
+    #             'status': False,
+    #             'message': 'Invalid refresh token'
+    #         }, status=status.HTTP_401_UNAUTHORIZED)
         
 
 # ------------------------- middelware code for frontend -----------------------
@@ -2130,7 +2152,7 @@ class OrderProcessView(APIView):
                     'status': 'error',
                     'message': 'No default address found'
                 }, status=status.HTTP_400_BAD_REQUEST)
-
+            
             # Get MLM discount percentage if applicable
             discount_percentage = 0
             if request.user.role == 'MLM_MEMBER':
@@ -2198,6 +2220,16 @@ class OrderProcessView(APIView):
                 billing_address=f"{default_address.name}, {default_address.street_address}, {default_address.city}, {default_address.state}, {default_address.postal_code}",
                 total_bp=total_bp_points,
                 status='PENDING'
+            )
+
+            # Create shipping address record
+            ShippingAddress.objects.create(
+                order=order,
+                name=default_address.name,
+                street_address=default_address.street_address,
+                city=default_address.city,
+                state=default_address.state,
+                postal_code=default_address.postal_code,
             )
 
             # Create order items
@@ -6192,64 +6224,6 @@ class CommissionActivationRequestViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"Error creating commission activation request: {str(e)}")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-    # def create(self, request, *args, **kwargs):
-    #     try:
-
-    #         logger.info(f"Creating commission activation request with data: {request.data}")
-
-    #         # Ensure the requester is an MLM member
-    #         if request.user.role != 'MLM_MEMBER':
-    #             return Response({
-    #                 'error': 'Only MLM members can create commission activation requests'
-    #             }, status=status.HTTP_403_FORBIDDEN)
-
-    #         # Get the current MLM member
-    #         requester = request.user.mlm_profile
-            
-    #         # Check if the member's current position allows commission
-    #         if requester.position.can_earn_commission:
-    #             return Response({
-    #                 'error': 'You are already eligible to earn commissions'
-    #             }, status=status.HTTP_400_BAD_REQUEST)
-
-    #         # Find the next position that allows commission
-    #         target_position = Position.objects.filter(
-    #             can_earn_commission=True,
-    #             level_order__gt=requester.position.level_order
-    #         ).first()
-
-    #         if not target_position:
-    #             return Response({
-    #                 'error': 'No eligible position found for commission activation'
-    #             }, status=status.HTTP_400_BAD_REQUEST)
-
-    #         # Prepare request data - Note the sponsor field is optional
-    #         request_data = {
-    #             'requester': requester.id,
-    #             'current_position': requester.position.id,
-    #             'target_position': target_position.id,
-    #         }
-
-    #         # Add sponsor only if it exists
-    #         if requester.sponsor:
-    #             request_data['sponsor'] = requester.sponsor.id
-
-    #         logger.info(f"Data for serializer: {request_data}")
-
-
-    #         serializer = self.get_serializer(data=request_data)
-    #         if not serializer.is_valid():
-    #             logger.error(f"Serializer validation errors: {serializer.errors}")
-    #             return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-    #         serializer.is_valid(raise_exception=True)
-    #         self.perform_create(serializer)
-            
-    #         return Response(serializer.data, status=status.HTTP_201_CREATED)
-            
-    #     except Exception as e:
-    #         # Error handling
-    #         logger.error(f"Error creating commission activation request: {str(e)}")
-    #         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     def create_notifications(self, request_instance):
         """
@@ -6333,48 +6307,216 @@ class CommissionActivationRequestViewSet(viewsets.ModelViewSet):
         
 
 
-
+class QuixGoPickupAddressView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    # def get(self, request):
+    #     """Get all pickup addresses from QuixGo"""
+    #     try:
+    #         logger.info("Getting pickup addresses from QuixGo")
+    #         service = QuixGoShippingService()
+    #         result = service.get_pickup_addresses()
+            
+    #         logger.info(f"Pickup addresses result: {result}")
+            
+    #         if result['success']:
+    #             return Response(result['addresses'])  # Return just the addresses array
+    #         else:
+    #             logger.error(f"Failed to fetch pickup addresses: {result.get('error')}")
+    #             return Response({
+    #                 'success': False,
+    #                 'message': 'Failed to fetch pickup addresses',
+    #                 'error': result.get('error')
+    #             }, status=status.HTTP_400_BAD_REQUEST)
+                
+    #     except Exception as e:
+    #         logger.error(f"Error fetching pickup addresses: {str(e)}", exc_info=True)
+    #         return Response({
+    #             'success': False,
+    #             'message': 'An error occurred',
+    #             'error': str(e)
+    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    def get(self, request):
+        """Get all pickup addresses from QuixGo and save to database"""
+        try:
+            logger.info("Getting pickup addresses from QuixGo")
+            service = QuixGoShippingService()
+            result = service.get_pickup_addresses()
+            
+            logger.info(f"Pickup addresses result: {result}")
+            
+            if result['success']:
+                addresses = result['addresses']
+                
+                # Save addresses to database
+                saved_addresses = self.save_addresses_to_db(addresses)
+                
+                # Return the saved addresses
+                return Response(saved_addresses)
+            else:
+                logger.error(f"Failed to fetch pickup addresses: {result.get('error')}")
+                
+                # If API fails, return addresses from database as fallback
+                db_addresses = PickupAddress.objects.filter(is_active=True)
+                if db_addresses.exists():
+                    serializer = PickupAddressSerializer(db_addresses, many=True)
+                    return Response(serializer.data)
+                
+                return Response({
+                    'success': False,
+                    'message': 'Failed to fetch pickup addresses',
+                    'error': result.get('error')
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            logger.error(f"Error fetching pickup addresses: {str(e)}", exc_info=True)
+            
+            # If exception occurs, return addresses from database as fallback
+            db_addresses = PickupAddress.objects.filter(is_active=True)
+            if db_addresses.exists():
+                serializer = PickupAddressSerializer(db_addresses, many=True)
+                return Response(serializer.data)
+            
+            return Response({
+                'success': False,
+                'message': 'An error occurred',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def save_addresses_to_db(self, addresses):
+        """
+        Save QuixGo addresses to local database
+        
+        Args:
+            addresses (list): List of address dictionaries from QuixGo
+            
+        Returns:
+            list: Serialized address data
+        """
+        saved_addresses = []
+        
+        for addr in addresses:
+            try:
+                # Check if address already exists by addressId
+                address_id = addr.get('addressId')
+                
+                # Map QuixGo fields to our model fields
+                address_data = {
+                    'name': addr.get('pickupName', ''),
+                    'address_id': address_id,
+                    'customer_id': addr.get('customerId', ''),
+                    'contact_person': addr.get('cpPerson', ''),
+                    'address_line1': addr.get('address1', ''),
+                    'address_line2': addr.get('address2', ''),
+                    'city': addr.get('city', ''),
+                    'state': addr.get('state', ''),
+                    'country': addr.get('country', 'India'),
+                    'pincode': addr.get('pincode', ''),
+                    'phone': addr.get('cpMobile', ''),
+                    'alternate_phone': addr.get('alternateNumber', ''),
+                    'email': addr.get('email', ''),
+                    'landmark': addr.get('landmark', ''),
+                    'address_type': addr.get('addressType', 'Office'),
+                    'is_active': addr.get('isActive', True)
+                }
+                
+                # Check if this is marked as a default address
+                # You might need to adjust this based on QuixGo's response format
+                is_default = False
+                
+                # Update or create the address
+                db_address, created = PickupAddress.objects.update_or_create(
+                    address_id=address_id,
+                    defaults={**address_data, 'is_default': is_default}
+                )
+                
+                # Serialize for response
+                serializer = PickupAddressSerializer(db_address)
+                saved_addresses.append(serializer.data)
+                
+                logger.info(f"{'Created' if created else 'Updated'} pickup address: {db_address.name}")
+                
+            except Exception as e:
+                logger.error(f"Error saving pickup address: {str(e)}")
+                # Continue with next address
+        
+        # If no address is set as default, set the first one
+        default_exists = PickupAddress.objects.filter(is_default=True).exists()
+        if not default_exists and saved_addresses:
+            first_address = PickupAddress.objects.first()
+            if first_address:
+                first_address.is_default = True
+                first_address.save()
+                logger.info(f"Set {first_address.name} as default address")
+                
+                # Update the serialized data for the default address
+                for i, addr in enumerate(saved_addresses):
+                    if addr.get('id') == first_address.id:
+                        saved_addresses[i]['is_default'] = True
+                        break
+        
+        return saved_addresses
+        
 class PickupAddressViewSet(viewsets.ModelViewSet):
     queryset = PickupAddress.objects.all()
     serializer_class = PickupAddressSerializer
     permission_classes = [IsAuthenticated]
     
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            self.permission_classes = [IsAdminUser]
-        return super().get_permissions()
-    
-    def get_queryset(self):
-        queryset = PickupAddress.objects.filter(is_active=True)
-        return queryset
-    
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            # Create address in QuixGo first
-            shipping_service = QuixGoShippingService()
-            response = shipping_service.create_pickup_address(serializer.validated_data)
+     
+    def get(self, request):
+        """Get all pickup addresses from QuixGo"""
+        try:
+            logger.info("Getting pickup addresses from QuixGo")
+            service = QuixGoShippingService()
+            result = service.get_pickup_addresses()
             
-            if response['success']:
-                # Save the QuixGo address ID
-                address = serializer.save(
-                    address_id=response['address_id'],
-                    customer_id=shipping_service.customer_id
-                )
-                return Response(self.get_serializer(address).data, status=status.HTTP_201_CREATED)
+            logger.info(f"Pickup addresses result: {result}")
+            
+            if result['success']:
+                return Response(result['addresses'])  # Return just the addresses array
             else:
-                return Response(
-                    {'error': 'Failed to create pickup address in QuixGo', 'details': response['error']},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                logger.error(f"Failed to fetch pickup addresses: {result.get('error')}")
+                return Response({
+                    'success': False,
+                    'message': 'Failed to fetch pickup addresses',
+                    'error': result.get('error')
+                }, status=status.HTTP_400_BAD_REQUEST)
+                    
+        except Exception as e:
+            logger.error(f"Error fetching pickup addresses: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'message': 'An error occurred',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    # def create(self, request, *args, **kwargs):
+    #     serializer = self.get_serializer(data=request.data)
+    #     if serializer.is_valid():
+    #         # Create address in QuixGo first
+    #         shipping_service = QuixGoShippingService()
+    #         response = shipping_service.create_pickup_address(serializer.validated_data)
+            
+    #         if response['success']:
+    #             # Save the QuixGo address ID
+    #             address = serializer.save(
+    #                 address_id=response['address_id'],
+    #                 customer_id=shipping_service.customer_id
+    #             )
+    #             return Response(self.get_serializer(address).data, status=status.HTTP_201_CREATED)
+    #         else:
+    #             return Response(
+    #                 {'error': 'Failed to create pickup address in QuixGo', 'details': response['error']},
+    #                 status=status.HTTP_400_BAD_REQUEST
+    #             )
+    #     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=True, methods=['post'])
-    def set_default(self, request, pk=None):
-        address = self.get_object()
-        address.is_default = True
-        address.save()  # This will unset any other defaults due to the model's save method
-        return Response({'status': 'success', 'message': 'Default pickup address set'})
+    # @action(detail=True, methods=['post'])
+    # def set_default(self, request, pk=None):
+    #     address = self.get_object()
+    #     address.is_default = True
+    #     address.save()  # This will unset any other defaults due to the model's save method
+    #     return Response({'status': 'success', 'message': 'Default pickup address set'})
 
 class ShipmentViewSet(viewsets.ModelViewSet):
     queryset = Shipment.objects.all()
@@ -6399,6 +6541,10 @@ class ShipmentViewSet(viewsets.ModelViewSet):
             order = get_object_or_404(Order, id=serializer.validated_data['order'].id)
             pickup_address = get_object_or_404(PickupAddress, id=serializer.validated_data['pickup_address'].id)
             
+            from django.db import models
+            # Calculate total quantity of items in the order
+            total_quantity = order.items.aggregate(total=models.Sum('quantity'))['total'] or 1
+
             # Extract shipment data from request
             shipment_data = {
                 'weight': serializer.validated_data.get('weight', 1.0),
@@ -6411,25 +6557,25 @@ class ShipmentViewSet(viewsets.ModelViewSet):
                 'service_type': serializer.validated_data.get('service_type', 'SF'),
                 'invoice_value': order.final_amount,
                 'product_name': 'Order Products',
-                'product_type': 'Merchandise',
-                'quantity': '1',
+                'product_type': 'Nutritional supplements',
+                'quantity': str(total_quantity),
                 'order_number': order.order_number,
             }
             
             # Create delivery address from order shipping address
-            shipping_address = order.shipping_address
-            # Note: You'll need to parse the shipping address from your Order model
-            # This is an example assuming shipping_address is a formatted string
+            # shipping_address = order.shipping_address
+            shipping_info = order.shipping_details
             delivery_address = {
-                'name': order.user.get_full_name(),
-                'address1': shipping_address.split(',')[0],
-                'address2': shipping_address.split(',')[1] if len(shipping_address.split(',')) > 1 else '',
-                'city': shipping_address.split(',')[2] if len(shipping_address.split(',')) > 2 else '',
-                'state': shipping_address.split(',')[3] if len(shipping_address.split(',')) > 3 else '',
-                'pincode': shipping_address.split(',')[4] if len(shipping_address.split(',')) > 4 else '',
-                'mobile': order.user.phone_number,
-                'email': order.user.email,
-                'addressType': 'Home'
+                'name': order.user.get_full_name()  or 'Customer',
+                'email': order.user.email or '',
+                'mobile': order.user.phone_number or '',
+                'address1': shipping_info.street_address,
+                'address2': '',
+                "landmark": '',
+                'city': shipping_info.city,
+                'state': shipping_info.state,
+                'pincode': shipping_info.postal_code,
+                'addressType': shipping_info.name or 'Home',
             }
             
             # Get QuixGo pickup address data (already registered)
@@ -6623,8 +6769,6 @@ class ShipmentViewSet(viewsets.ModelViewSet):
         elif shipment.status == 'CANCELLED' and order.status != 'DELIVERED':
             order.status = 'CANCELLED'
             order.save()
-
-
 
 class MLMMemberReportsView(APIView):
     permission_classes = [IsAuthenticated]
@@ -6915,8 +7059,6 @@ class MLMMemberReportsView(APIView):
         elif period_type == 'yearly':
             return str(period.year)
         return str(period)
-
-
 
 class LiveCommissionDashboardView(APIView):
     """
@@ -7612,37 +7754,90 @@ class PickupAddressListView(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-# class PickupAddressViewSet(viewsets.ModelViewSet):
+
+# class ShipmentViewSet(viewsets.ModelViewSet):
+#     queryset = Shipment.objects.all()
+#     serializer_class = ShipmentSerializer
+#     permission_classes = [IsAuthenticated]
+    
+#     def get_permissions(self):
+#         """Set permissions based on action"""
+#         if self.action in ['create', 'update', 'partial_update', 'destroy', 'cancel']:
+#             return [IsAdminUser()]
+#         return super().get_permissions()
+    
+#     def get_queryset(self):
+#         """Filter shipments based on user role"""
+#         user = self.request.user
+#         if user.role == 'ADMIN':
+#             queryset = Shipment.objects.all()
+#         else:
+#             queryset = Shipment.objects.filter(order__user=user)
+            
+#         # Apply filters
+#         status_filter = self.request.query_params.get('status')
+#         if status_filter:
+#             queryset = queryset.filter(status=status_filter)
+            
+#         order_id = self.request.query_params.get('order_id')
+#         if order_id:
+#             queryset = queryset.filter(order_id=order_id)
+            
+#         return queryset.order_by('-created_at')
+
 #     def create(self, request):
-#         """Create pickup address directly"""
-#         serializer = PickupAddressSerializer(data=request.data)
+#         """Book a shipment"""
+#         serializer = ShipmentSerializer(data=request.data)
         
 #         if serializer.is_valid():
 #             try:
-#                 # Get shipping config for token
+#                 # Get shipping config
 #                 config = ShippingConfig.objects.get(email=request.user.email)
                 
+#                 # Get order and pickup address
+#                 order = serializer.validated_data.get('order')
+#                 pickup_address = serializer.validated_data.get('pickup_address')
+                
 #                 # Prepare payload for QuixGo
-#                 payload = {
-#                     "pickupName": serializer.validated_data.get('name'),
+#                 payload = [{
+#                     "deliveryAddress": {
+#                         "name": order.user.get_full_name(),
+#                         "address1": order.shipping_address,
+#                         "city": order.shipping_city,
+#                         "state": order.shipping_state,
+#                         "pincode": order.shipping_pincode,
+#                         "mobile": order.user.phone_number,
+#                         "addressType": "Home"
+#                     },
+#                     "pickupAddress": {
+#                         "addressId": pickup_address.address_id,
+#                         "customerId": config.customer_id,
+#                         "addressType": pickup_address.address_type,
+#                         "cpPerson": pickup_address.contact_person,
+#                         "address1": pickup_address.address_line1,
+#                         "city": pickup_address.city,
+#                         "state": pickup_address.state,
+#                         "pincode": pickup_address.pincode,
+#                         "cpMobile": pickup_address.phone
+#                     },
+#                     "productDetails": {
+#                         "weight": str(serializer.validated_data.get('weight', 1)),
+#                         "invoice": str(int(order.final_amount)),
+#                         "productName": "Order Products",
+#                         "quantity": "1",
+#                         "orderNumber": order.order_number
+#                     },
+#                     "serviceProvider": config.default_courier,
+#                     "serviceType": config.default_service_type,
+#                     "paymentMode": "COD" if order.orderType == "COD" else "Prepaid",
 #                     "customerId": config.customer_id,
-#                     "cpPerson": serializer.validated_data.get('contact_person'),
-#                     "address1": serializer.validated_data.get('address_line1'),
-#                     "address2": serializer.validated_data.get('address_line2', ''),
-#                     "city": serializer.validated_data.get('city'),
-#                     "state": serializer.validated_data.get('state'),
-#                     "country": serializer.validated_data.get('country', 'India'),
-#                     "addressType": serializer.validated_data.get('address_type', 'Office'),
-#                     "pincode": serializer.validated_data.get('pincode'),
-#                     "cpMobile": serializer.validated_data.get('phone'),
-#                     "alternateNumber": serializer.validated_data.get('alternate_phone', ''),
-#                     "email": serializer.validated_data.get('email', ''),
-#                     "landmark": serializer.validated_data.get('landmark', '')
-#                 }
+#                     "insuranceCharge": 0,
+#                     "bookingChannel": "web"
+#                 }]
                 
 #                 # Send request to QuixGo
 #                 response = requests.post(
-#                     'https://dev.api.quixgo.com/clientApi/addPickupPoint',
+#                     'https://api.quixgo.com/clientApi/v2/bookShipment',
 #                     headers={
 #                         'Content-Type': 'application/json',
 #                         'Authorization': config.access_token
@@ -7651,21 +7846,22 @@ class PickupAddressListView(APIView):
 #                 )
                 
 #                 if response.status_code == 200:
-#                     # Save to our database
-#                     quixgo_response = response.json()
-#                     pickup_address = serializer.save(
-#                         address_id=quixgo_response.get('addressId'),
-#                         customer_id=config.customer_id
+#                     # Process response and save shipment
+#                     quixgo_response = response.json()[0]
+#                     shipment = serializer.save(
+#                         awb_number=quixgo_response.get('awbNumber'),
+#                         courier_name=quixgo_response.get('shipmentPartner'),
+#                         shipping_charge=quixgo_response.get('finalCharge')
 #                     )
                     
 #                     return Response({
 #                         'success': True,
-#                         'data': PickupAddressSerializer(pickup_address).data
+#                         'data': ShipmentSerializer(shipment).data
 #                     }, status=status.HTTP_201_CREATED)
 #                 else:
 #                     return Response({
 #                         'success': False,
-#                         'message': 'Failed to create pickup address in QuixGo'
+#                         'message': 'Failed to book shipment'
 #                     }, status=status.HTTP_400_BAD_REQUEST)
             
 #             except ShippingConfig.DoesNotExist:
@@ -7679,277 +7875,159 @@ class PickupAddressListView(APIView):
 #             'errors': serializer.errors
 #         }, status=status.HTTP_400_BAD_REQUEST)
 
-class ShipmentViewSet(viewsets.ModelViewSet):
-    queryset = Shipment.objects.all()
-    serializer_class = ShipmentSerializer
-    permission_classes = [IsAuthenticated]
+#     @action(detail=True, methods=['post'])
+#     def track(self, request, pk=None):
+#         """Track a shipment and update its status"""
+#         shipment = self.get_object()
+        
+#         if not shipment.awb_number:
+#             return Response({
+#                 'success': False,
+#                 'message': 'No AWB number available for tracking'
+#             }, status=status.HTTP_400_BAD_REQUEST)
+        
+#         shipping_service = QuixGoShippingService()
+#         quixgo_response = shipping_service.track_shipment(shipment.awb_number)
+        
+#         if quixgo_response.get('success'):
+#             # Update shipment status
+#             current_status = quixgo_response.get('current_status')
+            
+#             # Map QuixGo status to our status
+#             status_mapping = {
+#                 'Booked': 'BOOKED',
+#                 'Picked Up': 'PICKED_UP',
+#                 'In Transit': 'IN_TRANSIT',
+#                 'Out For Delivery': 'OUT_FOR_DELIVERY',
+#                 'Delivered': 'DELIVERED',
+#                 'Undelivered': 'FAILED_DELIVERY',
+#                 'RTO': 'RETURNED',
+#                 'Cancelled': 'CANCELLED'
+#             }
+            
+#             # Update status if it exists in our mapping
+#             if current_status in status_mapping:
+#                 shipment.status = status_mapping[current_status]
+            
+#             # Update status details
+#             shipment.status_details = {
+#                 'last_updated': timezone.now().isoformat(),
+#                 'quixgo_status': current_status,
+#                 'history': quixgo_response.get('status_history', [])
+#             }
+#             shipment.save()
+            
+#             # Create status update entries for each new status
+#             status_history = quixgo_response.get('status_history', [])
+#             for status_entry in status_history:
+#                 # Get status timestamp if available
+#                 timestamp = timezone.now()
+#                 if 'updateDate' in status_entry and status_entry['updateDate']:
+#                     try:
+#                         timestamp = datetime.fromisoformat(status_entry['updateDate'].replace('Z', '+00:00'))
+#                     except (ValueError, AttributeError):
+#                         pass
+                
+#                 # Create status update if it doesn't exist already
+#                 status_name = status_entry.get('statusName', 'Unknown')
+                
+#                 # Skip if we already have this status update
+#                 existing_status = ShipmentStatusUpdate.objects.filter(
+#                     shipment=shipment,
+#                     status=status_name,
+#                     timestamp=timestamp
+#                 ).exists()
+                
+#                 if not existing_status:
+#                     ShipmentStatusUpdate.objects.create(
+#                         shipment=shipment,
+#                         status=status_name,
+#                         status_details=status_entry.get('comment', ''),
+#                         location=status_entry.get('location', ''),
+#                         timestamp=timestamp
+#                     )
+            
+#             # Update order status if needed
+#             self.update_order_status(shipment)
+            
+#             return Response({
+#                 'success': True,
+#                 'message': 'Shipment status updated',
+#                 'status': shipment.status,
+#                 'status_history': quixgo_response.get('status_history', [])
+#             })
+#         else:
+#             return Response({
+#                 'success': False,
+#                 'message': 'Failed to track shipment',
+#                 'error': quixgo_response.get('error')
+#             }, status=status.HTTP_400_BAD_REQUEST)
     
-    def get_permissions(self):
-        """Set permissions based on action"""
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'cancel']:
-            return [IsAdminUser()]
-        return super().get_permissions()
+#     @action(detail=True, methods=['post'])
+#     def cancel(self, request, pk=None):
+#         """Cancel a shipment"""
+#         shipment = self.get_object()
+        
+#         if not shipment.awb_number:
+#             return Response({
+#                 'success': False,
+#                 'message': 'No AWB number available for cancellation'
+#             }, status=status.HTTP_400_BAD_REQUEST)
+        
+#         reason = request.data.get('reason', 'Order cancelled')
+        
+#         shipping_service = QuixGoShippingService()
+#         quixgo_response = shipping_service.cancel_shipment(shipment.awb_number, reason)
+        
+#         if quixgo_response.get('success'):
+#             # Update shipment status
+#             shipment.status = 'CANCELLED'
+#             shipment.is_cancelled = True
+#             shipment.status_details = {
+#                 **shipment.status_details,
+#                 'cancelled_at': timezone.now().isoformat(),
+#                 'reason': reason
+#             }
+#             shipment.save()
+            
+#             # Create status update
+#             ShipmentStatusUpdate.objects.create(
+#                 shipment=shipment,
+#                 status='CANCELLED',
+#                 status_details=reason,
+#                 timestamp=timezone.now()
+#             )
+            
+#             # Update order status
+#             order = shipment.order
+#             if order.status not in ['DELIVERED', 'CANCELLED']:
+#                 order.status = 'CANCELLED'
+#                 order.save()
+            
+#             return Response({
+#                 'success': True,
+#                 'message': 'Shipment cancelled successfully'
+#             })
+#         else:
+#             return Response({
+#                 'success': False,
+#                 'message': 'Failed to cancel shipment',
+#                 'error': quixgo_response.get('error')
+#             }, status=status.HTTP_400_BAD_REQUEST)
     
-    def get_queryset(self):
-        """Filter shipments based on user role"""
-        user = self.request.user
-        if user.role == 'ADMIN':
-            queryset = Shipment.objects.all()
-        else:
-            queryset = Shipment.objects.filter(order__user=user)
-            
-        # Apply filters
-        status_filter = self.request.query_params.get('status')
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
-            
-        order_id = self.request.query_params.get('order_id')
-        if order_id:
-            queryset = queryset.filter(order_id=order_id)
-            
-        return queryset.order_by('-created_at')
-
-    def create(self, request):
-        """Book a shipment"""
-        serializer = ShipmentSerializer(data=request.data)
+#     def update_order_status(self, shipment):
+#         """Update the order status based on shipment status"""
+#         order = shipment.order
         
-        if serializer.is_valid():
-            try:
-                # Get shipping config
-                config = ShippingConfig.objects.get(email=request.user.email)
-                
-                # Get order and pickup address
-                order = serializer.validated_data.get('order')
-                pickup_address = serializer.validated_data.get('pickup_address')
-                
-                # Prepare payload for QuixGo
-                payload = [{
-                    "deliveryAddress": {
-                        "name": order.user.get_full_name(),
-                        "address1": order.shipping_address,
-                        "city": order.shipping_city,
-                        "state": order.shipping_state,
-                        "pincode": order.shipping_pincode,
-                        "mobile": order.user.phone_number,
-                        "addressType": "Home"
-                    },
-                    "pickupAddress": {
-                        "addressId": pickup_address.address_id,
-                        "customerId": config.customer_id,
-                        "addressType": pickup_address.address_type,
-                        "cpPerson": pickup_address.contact_person,
-                        "address1": pickup_address.address_line1,
-                        "city": pickup_address.city,
-                        "state": pickup_address.state,
-                        "pincode": pickup_address.pincode,
-                        "cpMobile": pickup_address.phone
-                    },
-                    "productDetails": {
-                        "weight": str(serializer.validated_data.get('weight', 1)),
-                        "invoice": str(int(order.final_amount)),
-                        "productName": "Order Products",
-                        "quantity": "1",
-                        "orderNumber": order.order_number
-                    },
-                    "serviceProvider": config.default_courier,
-                    "serviceType": config.default_service_type,
-                    "paymentMode": "COD" if order.orderType == "COD" else "Prepaid",
-                    "customerId": config.customer_id
-                }]
-                
-                # Send request to QuixGo
-                response = requests.post(
-                    'https://dev.api.quixgo.com/clientApi/v2/bookShipment',
-                    headers={
-                        'Content-Type': 'application/json',
-                        'Authorization': config.access_token
-                    },
-                    json=payload
-                )
-                
-                if response.status_code == 200:
-                    # Process response and save shipment
-                    quixgo_response = response.json()[0]
-                    shipment = serializer.save(
-                        awb_number=quixgo_response.get('awbNumber'),
-                        courier_name=quixgo_response.get('shipmentPartner'),
-                        shipping_charge=quixgo_response.get('finalCharge')
-                    )
-                    
-                    return Response({
-                        'success': True,
-                        'data': ShipmentSerializer(shipment).data
-                    }, status=status.HTTP_201_CREATED)
-                else:
-                    return Response({
-                        'success': False,
-                        'message': 'Failed to book shipment'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            
-            except ShippingConfig.DoesNotExist:
-                return Response({
-                    'success': False,
-                    'message': 'No shipping configuration found'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        
-        return Response({
-            'success': False,
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=True, methods=['post'])
-    def track(self, request, pk=None):
-        """Track a shipment and update its status"""
-        shipment = self.get_object()
-        
-        if not shipment.awb_number:
-            return Response({
-                'success': False,
-                'message': 'No AWB number available for tracking'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        shipping_service = QuixGoShippingService()
-        quixgo_response = shipping_service.track_shipment(shipment.awb_number)
-        
-        if quixgo_response.get('success'):
-            # Update shipment status
-            current_status = quixgo_response.get('current_status')
-            
-            # Map QuixGo status to our status
-            status_mapping = {
-                'Booked': 'BOOKED',
-                'Picked Up': 'PICKED_UP',
-                'In Transit': 'IN_TRANSIT',
-                'Out For Delivery': 'OUT_FOR_DELIVERY',
-                'Delivered': 'DELIVERED',
-                'Undelivered': 'FAILED_DELIVERY',
-                'RTO': 'RETURNED',
-                'Cancelled': 'CANCELLED'
-            }
-            
-            # Update status if it exists in our mapping
-            if current_status in status_mapping:
-                shipment.status = status_mapping[current_status]
-            
-            # Update status details
-            shipment.status_details = {
-                'last_updated': timezone.now().isoformat(),
-                'quixgo_status': current_status,
-                'history': quixgo_response.get('status_history', [])
-            }
-            shipment.save()
-            
-            # Create status update entries for each new status
-            status_history = quixgo_response.get('status_history', [])
-            for status_entry in status_history:
-                # Get status timestamp if available
-                timestamp = timezone.now()
-                if 'updateDate' in status_entry and status_entry['updateDate']:
-                    try:
-                        timestamp = datetime.fromisoformat(status_entry['updateDate'].replace('Z', '+00:00'))
-                    except (ValueError, AttributeError):
-                        pass
-                
-                # Create status update if it doesn't exist already
-                status_name = status_entry.get('statusName', 'Unknown')
-                
-                # Skip if we already have this status update
-                existing_status = ShipmentStatusUpdate.objects.filter(
-                    shipment=shipment,
-                    status=status_name,
-                    timestamp=timestamp
-                ).exists()
-                
-                if not existing_status:
-                    ShipmentStatusUpdate.objects.create(
-                        shipment=shipment,
-                        status=status_name,
-                        status_details=status_entry.get('comment', ''),
-                        location=status_entry.get('location', ''),
-                        timestamp=timestamp
-                    )
-            
-            # Update order status if needed
-            self.update_order_status(shipment)
-            
-            return Response({
-                'success': True,
-                'message': 'Shipment status updated',
-                'status': shipment.status,
-                'status_history': quixgo_response.get('status_history', [])
-            })
-        else:
-            return Response({
-                'success': False,
-                'message': 'Failed to track shipment',
-                'error': quixgo_response.get('error')
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    @action(detail=True, methods=['post'])
-    def cancel(self, request, pk=None):
-        """Cancel a shipment"""
-        shipment = self.get_object()
-        
-        if not shipment.awb_number:
-            return Response({
-                'success': False,
-                'message': 'No AWB number available for cancellation'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        reason = request.data.get('reason', 'Order cancelled')
-        
-        shipping_service = QuixGoShippingService()
-        quixgo_response = shipping_service.cancel_shipment(shipment.awb_number, reason)
-        
-        if quixgo_response.get('success'):
-            # Update shipment status
-            shipment.status = 'CANCELLED'
-            shipment.is_cancelled = True
-            shipment.status_details = {
-                **shipment.status_details,
-                'cancelled_at': timezone.now().isoformat(),
-                'reason': reason
-            }
-            shipment.save()
-            
-            # Create status update
-            ShipmentStatusUpdate.objects.create(
-                shipment=shipment,
-                status='CANCELLED',
-                status_details=reason,
-                timestamp=timezone.now()
-            )
-            
-            # Update order status
-            order = shipment.order
-            if order.status not in ['DELIVERED', 'CANCELLED']:
-                order.status = 'CANCELLED'
-                order.save()
-            
-            return Response({
-                'success': True,
-                'message': 'Shipment cancelled successfully'
-            })
-        else:
-            return Response({
-                'success': False,
-                'message': 'Failed to cancel shipment',
-                'error': quixgo_response.get('error')
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    def update_order_status(self, shipment):
-        """Update the order status based on shipment status"""
-        order = shipment.order
-        
-        if shipment.status == 'DELIVERED':
-            order.status = 'DELIVERED'
-            order.save()
-        elif shipment.status == 'RETURNED':
-            order.status = 'RETURNED'
-            order.save()
-        elif shipment.status == 'CANCELLED' and order.status != 'DELIVERED':
-            order.status = 'CANCELLED'
-            order.save()
+#         if shipment.status == 'DELIVERED':
+#             order.status = 'DELIVERED'
+#             order.save()
+#         elif shipment.status == 'RETURNED':
+#             order.status = 'RETURNED'
+#             order.save()
+#         elif shipment.status == 'CANCELLED' and order.status != 'DELIVERED':
+#             order.status = 'CANCELLED'
+#             order.save()
 
 class OrderShippingView(APIView):
     """
@@ -8062,13 +8140,64 @@ class ShippingDashboardView(APIView):
             ).order_by('-order_date')[:10]
             
             pending_data = []
+            # for order in pending_orders:
+            #     pending_data.append({
+            #         'id': order.id,
+            #         'order_number': order.order_number,
+            #         'order_date': order.order_date,
+            #         'user_name': order.user.get_full_name(),
+            #         'amount': float(order.final_amount),
+                    
+            #     })
             for order in pending_orders:
+                # Collect order items details
+                items_data = []
+                for item in order.items.all():
+                    items_data.append({
+                        'id': item.id,
+                        'product_id': item.product.id,
+                        'product_name': item.product.name,
+                        'quantity': item.quantity,
+                        'price': float(item.price),
+                        'discount_percentage': float(item.discount_percentage),
+                        'discount_amount': float(item.discount_amount),
+                        'final_price': float(item.final_price),
+                        'gst_amount': float(item.gst_amount),
+                        'bp_points': item.bp_points
+                    })
+                
+                # Build full order details
                 pending_data.append({
                     'id': order.id,
                     'order_number': order.order_number,
                     'order_date': order.order_date,
-                    'user_name': order.user.get_full_name(),
-                    'amount': float(order.final_amount)
+                    'status': order.status,
+                    'user': {
+                        'id': order.user.id,
+                        'name': order.user.get_full_name(),
+                        'email': order.user.email,
+                        'phone_number': order.user.phone_number
+                    },
+                    'financial_details': {
+                        'total_amount': float(order.total_amount),
+                        'discount_amount': float(order.discount_amount),
+                        'final_amount': float(order.final_amount),
+                        'discount_percentage': float(order.discount_percentage)
+                    },
+                    'shipping_details': {
+                        'shipping_address': order.shipping_address,
+                        'billing_address': order.billing_address
+                    },
+                    'bp_details': {
+                        'total_bp': order.total_bp,
+                        'bp_processed': order.bp_processed
+                    },
+                    'payment_details': {
+                        'razorpay_order_id': order.razorpay_order_id,
+                        'payment_id': order.payment_id,
+                        'order_type': order.orderType
+                    },
+                    'items': items_data
                 })
             
             return Response({

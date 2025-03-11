@@ -1985,3 +1985,22 @@ class ShippingConfig(models.Model):
 
     def __str__(self):
         return f"{self.email} API"
+
+
+
+class ShippingAddress(models.Model):
+    order = models.OneToOneField('Order', on_delete=models.CASCADE, related_name='shipping_details')
+    name = models.CharField(max_length=100, help_text="Name for this address (e.g. Home, Office)")
+    street_address = models.CharField(max_length=255)
+    city = models.CharField(max_length=100)
+    state = models.CharField(max_length=100)
+    postal_code = models.CharField(max_length=10)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'shipping_addresses'
+        verbose_name_plural = 'Shipping Addresses'
+    
+    def __str__(self):
+        return f"Shipping for {self.order.order_number}"

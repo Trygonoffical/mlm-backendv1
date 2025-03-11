@@ -4,7 +4,7 @@ from django.conf.urls.static import static
 from django.urls import path , include
 
 from rest_framework.routers import DefaultRouter
-from appAuth.views import GenerateOTP , VerifyOTP , UserLogin , RefreshToken , ValidateTokenView , CustomTokenRefreshView , HomeSliderViewSet , CategoryViewSet , ProductViewSet , PositionViewSet , MLMMemberViewSet , TestimonialViewSet , AdvertisementViewSet , SuccessStoryViewSet , CustomerPickViewSet , CompanyInfoViewSet , AboutViewSet , HomeSectionViewSet , MenuViewSet , CustomPageViewSet , KYCDocumentViewSet , BlogViewSet , CreateOrderView, VerifyPaymentView , AddressViewSet , CustomerProfileView , OrderProcessView , PaymentWebhookView , download_invoice , OrderViewSet , WalletViewSet, WalletTransactionViewSet, WithdrawalRequestViewSet , NotificationViewSet , AdminOrderListView , UpdateOrderStatusView , MLMOrderListView , MLMMemberTreeView , MLMMemberDetailsView , MLMReportView , MLMDashboardView , AdminDashboardView , MLMMemberRegistrationView , DownlineListView , ContactViewSet , NewsletterViewSet , MLMLiveCommissionView , AdminCustomerViewSet , OrderTrackingView , CheckUsernameView , UpdateStockView , CheckStockAvailabilityView , OrderCancellationView , RequestPasswordResetView , ProcessPasswordResetView , PasswordResetRequestListView , MLMProfileView , CommissionActivationRequestViewSet ,PickupAddressViewSet , ShipmentViewSet , MLMMemberReportsView , LiveCommissionDashboardView , CalculateCommissionsView , CommissionHistoryView , ShippingConfigView , OrderShippingView , ShippingDashboardView , test_shipping_connection , CheckQuixGoTokenView , RefreshQuixGoTokenView
+from appAuth.views import GenerateOTP , VerifyOTP , UserLogin , RefreshToken , ValidateTokenView , CustomTokenRefreshView , HomeSliderViewSet , CategoryViewSet , ProductViewSet , PositionViewSet , MLMMemberViewSet , TestimonialViewSet , AdvertisementViewSet , SuccessStoryViewSet , CustomerPickViewSet , CompanyInfoViewSet , AboutViewSet , HomeSectionViewSet , MenuViewSet , CustomPageViewSet , KYCDocumentViewSet , BlogViewSet , CreateOrderView, VerifyPaymentView , AddressViewSet , CustomerProfileView , OrderProcessView , PaymentWebhookView , download_invoice , OrderViewSet , WalletViewSet, WalletTransactionViewSet, WithdrawalRequestViewSet , NotificationViewSet , AdminOrderListView , UpdateOrderStatusView , MLMOrderListView , MLMMemberTreeView , MLMMemberDetailsView , MLMReportView , MLMDashboardView , AdminDashboardView , MLMMemberRegistrationView , DownlineListView , ContactViewSet , NewsletterViewSet , MLMLiveCommissionView , AdminCustomerViewSet , OrderTrackingView , CheckUsernameView , UpdateStockView , CheckStockAvailabilityView , OrderCancellationView , RequestPasswordResetView , ProcessPasswordResetView , PasswordResetRequestListView , MLMProfileView , CommissionActivationRequestViewSet ,PickupAddressViewSet , ShipmentViewSet , MLMMemberReportsView , LiveCommissionDashboardView , CalculateCommissionsView , CommissionHistoryView , ShippingConfigView , OrderShippingView , ShippingDashboardView , test_shipping_connection , CheckQuixGoTokenView , RefreshQuixGoTokenView , QuixGoPickupAddressView
 
 
 router = DefaultRouter()
@@ -35,13 +35,13 @@ router.register(r'contacts', ContactViewSet, basename='contact')
 router.register(r'newsletters', NewsletterViewSet ,basename='newsletters' )
 router.register(r'admin/customers', AdminCustomerViewSet, basename='admin-customers')
 router.register(r'commission-activation-requests', CommissionActivationRequestViewSet, basename='commission-activation-request')
-router.register(r'pickup-addresses', PickupAddressViewSet , basename='pickup-addresses')
+# router.register(r'pickup-addresses', QuixGoPickupAddressView , basename='pickup-addresses')
 # router.register(r'shipments', ShipmentViewSet , basename='shipments')
 # router.register(r'shipping/pickup-addresses', PickupAddressViewSet, basename='pickup-address')
 # router.register(r'shipping/shipments', ShipmentViewSet, basename='shipment')
 # router.register(r'shipping/config', ShippingConfigView, basename='shipping-config')
 
-router.register(r'pickup-addresses', PickupAddressViewSet, basename='pickup-address')
+# router.register(r'pickup-addresses', PickupAddressViewSet, basename='pickup-address')
 router.register(r'shipments', ShipmentViewSet, basename='shipment')
 
 urlpatterns = [
@@ -171,6 +171,7 @@ urlpatterns = [
     
     path('config/check-token/', CheckQuixGoTokenView.as_view(), name='check-token'),
     path('config/refresh-token/', RefreshQuixGoTokenView.as_view(), name='refresh-token'),
+    path('pickup-addresses/', QuixGoPickupAddressView.as_view(), name='quixgo-pickup-addresses'),
 #     path('shipping/config/', ShippingConfigView.as_view(), name='shipping-config'),
 #     path('shipping/config/test-connection/', ShippingConfigView.as_view({"post": "test_connection"}), name='test-shipping-connection'),
     # path('kyc-documents/bank-details/', 
