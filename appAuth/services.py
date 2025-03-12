@@ -222,7 +222,7 @@ class QuixGoShippingService:
                 "returnAddress": pickup_address,  # Using same as pickup for simplicity
                 "customerType": "Business",
                 "productDetails": {
-                    "weight": str(shipment_data.get('weight', '1')),
+                    "weight": f"{float(shipment_data.get('weight', 1.0)):.2f}",
                     "height": str(shipment_data.get('height', '10')),
                     "width": str(shipment_data.get('width', '10')),
                     "length": str(shipment_data.get('length', '10')),
@@ -243,8 +243,8 @@ class QuixGoShippingService:
                 "bookingChannel": "web"
             }]
             
+            logger.info(f"Shipment booking Payload : {payload}")
             response = requests.post(url, headers=self.get_auth_header(), json=payload)
-            
             if response.status_code == 200:
                 data = response.json()
                 if isinstance(data, list) and len(data) > 0:

@@ -6562,7 +6562,7 @@ class ShipmentViewSet(viewsets.ModelViewSet):
                 'order_number': order.order_number,
             }
             
-            # Create delivery address from order shipping address
+            # Create delivery address from order shipping address  
             # shipping_address = order.shipping_address
             shipping_info = order.shipping_details
             delivery_address = {
@@ -6629,13 +6629,29 @@ class ShipmentViewSet(viewsets.ModelViewSet):
                 order.status = 'SHIPPED'
                 order.save()
                 
-                return Response(self.get_serializer(shipment).data, status=status.HTTP_201_CREATED)
+                # return Response(self.get_serializer(shipment).data, status=status.HTTP_201_CREATED)
+                return Response({
+                    'success': True,
+                    'message': 'Shipment created successfully',
+                    'data': self.get_serializer(shipment).data
+                }, status=status.HTTP_201_CREATED)
             else:
-                return Response(
-                    {'error': 'Failed to book shipment', 'details': response['error']},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                return Response({
+                    'success': False,
+                    'message': 'Failed to book shipment',
+                    'details': response['error']
+                }, status=status.HTTP_400_BAD_REQUEST)
+                # return Response(
+                #     {'error': 'Failed to book shipment', 'details': response['error']},
+                #     status=status.HTTP_400_BAD_REQUEST
+                # )
+        # return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+                'success': False,
+                'message': 'Failed to book shipment',
+                'details': response['error']
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
     
     @action(detail=True, methods=['post'])
     def track(self, request, pk=None):
