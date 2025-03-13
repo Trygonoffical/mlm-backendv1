@@ -320,6 +320,8 @@ class Order(models.Model):
         SHIPPED = 'SHIPPED', 'Shipped'
         DELIVERED = 'DELIVERED', 'Delivered'
         CANCELLED = 'CANCELLED', 'Cancelled'
+        RETURN_INITIATED = 'RETURN_INITIATED', 'Return Initiated'
+        RETURNED = 'RETURNED', 'Returned'
 
     class OrderType(models.TextChoices):
         ONLINE = 'ONLINE', 'Online'

@@ -17,7 +17,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer , CommissionActivationRequestSerializer ,ShipmentSerializer , PickupAddressSerializer , ShippingConfigSerializer
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer , CommissionActivationRequestSerializer ,ShipmentSerializer , PickupAddressSerializer , ShippingConfigSerializer 
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -8403,3 +8403,357 @@ class RefreshQuixGoTokenView(APIView):
                 'success': False,
                 'message': f'Error refreshing token: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ---------------------- Return Views ------------------------------
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_return_shipment(request):
+    """API endpoint to create a return shipment for an order"""
+    try:
+        # Extract data from request
+        order_id = request.data.get('order')
+        original_shipment_id = request.data.get('original_shipment_id')
+        reason = request.data.get('reason', 'Customer initiated return')
+        
+        # Validate input
+        if not order_id:
+            return Response({
+                'success': False,
+                'message': 'Order ID is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Get the order and verify ownership
+        try:
+            order = Order.objects.get(id=order_id)
+            
+            # Only allow the customer who placed the order to create returns
+            if order.user != request.user and request.user.role != 'ADMIN':
+                return Response({
+                    'success': False,
+                    'message': 'You are not authorized to create a return for this order'
+                }, status=status.HTTP_403_FORBIDDEN)
+                
+            # Check if return window is valid (7 days after delivery)
+            delivered_shipment = None
+            if original_shipment_id:
+                delivered_shipment = Shipment.objects.get(id=original_shipment_id)
+            else:
+                # Find the delivered shipment if not specified
+                delivered_shipment = Shipment.objects.filter(
+                    order=order,
+                    status='DELIVERED'
+                ).first()
+                
+            if not delivered_shipment:
+                return Response({
+                    'success': False,
+                    'message': 'No delivered shipment found for this order'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+            # Get delivery date from status updates
+            delivery_update = ShipmentStatusUpdate.objects.filter(
+                shipment=delivered_shipment,
+                status='DELIVERED'
+            ).order_by('-timestamp').first()
+            
+            if not delivery_update:
+                return Response({
+                    'success': False,
+                    'message': 'No delivery record found for this shipment'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+            # Calculate days since delivery
+            from django.utils import timezone
+            delivery_date = delivery_update.timestamp
+            days_since_delivery = (timezone.now() - delivery_date).days
+            
+            if days_since_delivery > 7:
+                return Response({
+                    'success': False,
+                    'message': 'Return window has expired (must be within 7 days of delivery)'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+            # Check if a return is already created for this order
+            existing_return = Shipment.objects.filter(
+                order=order,
+                service_type='RV'
+            ).exists()
+            
+            if existing_return:
+                return Response({
+                    'success': False,
+                    'message': 'A return has already been created for this order'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Create a new shipment data based on the original shipment
+            shipment_data = {
+                'order': order.id,
+                'pickup_address': delivered_shipment.pickup_address.id,
+                'weight': delivered_shipment.weight,
+                'length': delivered_shipment.length,
+                'width': delivered_shipment.width,
+                'height': delivered_shipment.height,
+                'service_type': 'RV',  # Only change is here - RV for return shipment
+                'courier_name': delivered_shipment.courier_name
+            }
+            
+            # Reuse the existing shipment creation endpoint with modified data
+            serializer = ShipmentSerializer(data=shipment_data)
+            if serializer.is_valid():
+                # Get the shipping service
+                shipping_service = QuixGoShippingService()
+                
+                # Get order and pickup address
+                pickup_address = delivered_shipment.pickup_address
+                
+                # Prepare shipment data for QuixGo
+                quixgo_shipment_data = {
+                    'weight': str(shipment_data['weight']),
+                    'length': str(shipment_data['length']),
+                    'width': str(shipment_data['width']),
+                    'height': str(shipment_data['height']),
+                    'invoice_value': str(order.final_amount),
+                    'product_name': 'Order Products',
+                    'product_type': 'Nutritional supplements',
+                    'quantity': str(sum(item.quantity for item in order.items.all())),
+                    'order_number': order.order_number,
+                    'courier': shipment_data['courier_name'],
+                    'service_type': 'RV',  # RV for returns
+                    'is_cod': False,
+                    'cod_amount': 0
+                }
+                
+                # Get QuixGo pickup address data (use the same as original shipment)
+                quixgo_pickup_address = {
+                    'addressId': pickup_address.address_id,
+                    'customerId': pickup_address.customer_id,
+                    'pickupName': pickup_address.name,
+                    'addressCategory': 'pickup',
+                    'addressType': pickup_address.address_type,
+                    'shipmentType': 'B2C',
+                    'cpPerson': pickup_address.contact_person,
+                    'address1': pickup_address.address_line1,
+                    'address2': pickup_address.address_line2,
+                    'city': pickup_address.city,
+                    'state': pickup_address.state,
+                    'country': pickup_address.country,
+                    'landmark': pickup_address.landmark,
+                    'pincode': pickup_address.pincode,
+                    'cpMobile': pickup_address.phone,
+                    'alternateNumber': pickup_address.alternate_phone,
+                    'email': pickup_address.email,
+                    'isActive': True,
+                    'isDeleted': False,
+                    'addName': f"{pickup_address.contact_person}-{pickup_address.pincode}-{pickup_address.customer_id}-{pickup_address.address_id}"
+                }
+                
+                # Get delivery address from the original order's shipping info
+                try:
+                    shipping_info = ShippingAddress.objects.get(order=order)
+                    delivery_address = {
+                        'name': shipping_info.name,
+                        'email': order.user.email or '',
+                        'mobile': order.user.phone_number or '',
+                        'address1': shipping_info.street_address,
+                        'address2': '',
+                        'landmark': '',
+                        'city': shipping_info.city,
+                        'state': shipping_info.state,
+                        'pincode': shipping_info.postal_code,
+                        'addressType': shipping_info.name or 'Home',
+                    }
+                except ShippingAddress.DoesNotExist:
+                    # Fall back to order's shipping address string
+                    delivery_address = {
+                        'name': order.user.get_full_name() or 'Customer',
+                        'email': order.user.email or '',
+                        'mobile': order.user.phone_number or '',
+                        'address1': order.shipping_address,
+                        'address2': '',
+                        'landmark': '',
+                        'city': '',
+                        'state': '',
+                        'pincode': '',
+                        'addressType': 'Home',
+                    }
+                
+                # Book shipment with QuixGo
+                response = shipping_service.book_shipment(
+                    quixgo_shipment_data, 
+                    quixgo_pickup_address, 
+                    delivery_address
+                )
+                
+                if response['success']:
+                    # Save shipment details
+                    return_shipment = serializer.save(
+                        awb_number=response['awb_number'],
+                        shipment_id=response['shipment_id'],
+                        courier_name=response['courier'],
+                        shipping_charge=response['charge'],
+                        status='BOOKED',
+                        status_details={
+                            'booked_at': timezone.now().isoformat(),
+                            'return_reason': reason,
+                            'is_return': True,
+                            'original_shipment_id': delivered_shipment.id
+                        }
+                    )
+                    
+                    # Create initial status update
+                    ShipmentStatusUpdate.objects.create(
+                        shipment=return_shipment,
+                        status='BOOKED',
+                        status_details=f"Return initiated: {reason}",
+                        timestamp=timezone.now()
+                    )
+                    
+                    # Update order status
+                    order.status = 'RETURN_INITIATED'
+                    order.save()
+                    
+                    return Response({
+                        'success': True,
+                        'message': 'Return shipment created successfully',
+                        'data': ShipmentSerializer(return_shipment).data
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    return Response({
+                        'success': False,
+                        'message': 'Failed to create return shipment',
+                        'details': response.get('error')
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    'success': False,
+                    'message': 'Invalid shipment data',
+                    'details': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Order.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'Order not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+            
+    except Exception as e:
+        logger.error(f"Error creating return shipment: {str(e)}")
+        return Response({
+            'success': False,
+            'message': 'An error occurred while creating the return shipment',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+
+# ------------------- customer Tracking ----------------
+
+@api_view(['GET'])
+@permission_classes([AllowAny])  # Allow anyone to track by AWB
+def track_by_awb(request):
+    """API endpoint to track a shipment using AWB number"""
+    awb_number = request.query_params.get('awb_number')
+    
+    if not awb_number:
+        return Response({
+            'error': 'AWB number is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Find the shipment with this AWB number
+        shipment = Shipment.objects.filter(awb_number=awb_number).first()
+        
+        if not shipment:
+            return Response({
+                'error': 'No shipment found with this AWB number'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get the order for this shipment
+        order = shipment.order
+        
+        # Get all shipments for this order
+        shipments = Shipment.objects.filter(order=order)
+        
+        # Build tracking response
+        tracking_data = {
+            'order_number': order.order_number,
+            'order_date': order.order_date,
+            'status': order.status,
+            'current_location': None,
+            'expected_delivery': None,
+            'shipping_address': order.shipping_address,
+            'shipments': []
+        }
+        
+        # Process dates for tracking steps
+        confirmed_date = None
+        shipped_date = None
+        delivered_date = None
+        returned_date = None
+        
+        if order.status in ['CONFIRMED', 'SHIPPED', 'DELIVERED']:
+            confirmed_date = order.updated_at
+        
+        # Add shipment data and determine dates
+        for s in shipments:
+            # Prepare shipment data
+            shipment_data = {
+                'id': s.id,
+                'awb_number': s.awb_number,
+                'courier': s.courier_name,
+                'status': s.status,
+                'is_return': s.service_type == 'RV',
+                'tracking_url': s.tracking_url,
+                'status_history': []
+            }
+            
+            # Add status history
+            status_updates = ShipmentStatusUpdate.objects.filter(shipment=s).order_by('-timestamp')
+            for update in status_updates:
+                shipment_data['status_history'].append({
+                    'status': update.status,
+                    'details': update.status_details,
+                    'location': update.location,
+                    'timestamp': update.timestamp
+                })
+                
+                # Update tracking step dates based on status updates
+                if update.status == 'PICKED_UP' and not shipped_date:
+                    shipped_date = update.timestamp
+                elif update.status == 'DELIVERED' and not delivered_date:
+                    delivered_date = update.timestamp
+                elif update.status in ['RETURNED', 'RTO'] and not returned_date:
+                    returned_date = update.timestamp
+            
+            # Check if this is the latest shipment to set current location
+            if s.status != 'DELIVERED' and s.status != 'CANCELLED':
+                if status_updates.exists():
+                    latest_update = status_updates.first()
+                    tracking_data['current_location'] = latest_update.location
+            
+            # Add expected delivery calculation
+            if s.status in ['PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY']:
+                # Set expected delivery as 3 days from ship date if available
+                if shipped_date:
+                    from datetime import timedelta
+                    expected_delivery = shipped_date + timedelta(days=3)
+                    tracking_data['expected_delivery'] = expected_delivery.strftime('%Y-%m-%d')
+            
+            # Add shipment to the list
+            tracking_data['shipments'].append(shipment_data)
+        
+        # Set step dates in response
+        tracking_data['confirmed_date'] = confirmed_date
+        tracking_data['shipped_date'] = shipped_date
+        tracking_data['delivered_date'] = delivered_date
+        tracking_data['returned_date'] = returned_date
+        
+        return Response(tracking_data)
+        
+    except Exception as e:
+        logger.error(f"Error tracking shipment by AWB: {str(e)}")
+        return Response({
+            'error': 'An error occurred while tracking the shipment'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
