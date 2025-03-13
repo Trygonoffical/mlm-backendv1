@@ -6767,7 +6767,7 @@ class ShipmentViewSet(viewsets.ModelViewSet):
                     'current_status': current_status,
                     'status_history': formatted_history,
                     'last_updated': timezone.now().isoformat(),
-                    'tracking_link': self.get_tracking_link(shipment)
+                    # 'tracking_link': self.get_tracking_link(shipment)
                 })
             else:
                 # Log the error
@@ -6791,48 +6791,81 @@ class ShipmentViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
-        """Cancel a shipment"""
-        shipment = self.get_object()
-        
-        if not shipment.awb_number:
-            return Response(
-                {'error': 'No AWB number available for cancellation'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        reason = request.data.get('reason', 'Order cancelled')
-        
-        shipping_service = QuixGoShippingService()
-        response = shipping_service.cancel_shipment(shipment.awb_number, reason)
-        
-        if response['success']:
-            # Update shipment status
-            shipment.status = 'CANCELLED'
-            shipment.is_cancelled = True
-            shipment.status_details = {
-                **shipment.status_details,
-                'cancelled_at': timezone.now().isoformat(),
-                'reason': reason
-            }
-            shipment.save()
+        """Cancel a shipment with improved error handling"""
+        try:
+            shipment = self.get_object()
             
-            # Create status update
-            ShipmentStatusUpdate.objects.create(
-                shipment=shipment,
-                status='CANCELLED',
-                status_details=reason,
-                timestamp=timezone.now()
-            )
+            if not shipment.awb_number:
+                return Response({
+                    'success': False,
+                    'message': 'No AWB number available for cancellation'
+                }, status=status.HTTP_400_BAD_REQUEST)
             
+            # Get reason from request data, with fallback
+            reason = request.data.get('reason', 'Order cancelled by admin')
+            
+            # Initialize shipping service and cancel the shipment
+            shipping_service = QuixGoShippingService()
+            cancel_response = shipping_service.cancel_shipment(shipment.awb_number, reason)
+            
+            # Log the complete response for debugging
+            logger.debug(f"Cancel response: {cancel_response}")
+            
+            if cancel_response.get('success'):
+                # Update shipment status locally
+                shipment.status = 'CANCELLED'
+                shipment.is_cancelled = True
+                
+                # Add cancellation details to status_details
+                if not isinstance(shipment.status_details, dict):
+                    shipment.status_details = {}
+                    
+                shipment.status_details.update({
+                    'cancelled_at': timezone.now().isoformat(),
+                    'cancellation_reason': reason,
+                    'cancelled_by': request.user.username
+                })
+                
+                # Save the updated shipment
+                shipment.save()
+                
+                # Create status update entry
+                ShipmentStatusUpdate.objects.create(
+                    shipment=shipment,
+                    status='CANCELLED',
+                    status_details=reason,
+                    timestamp=timezone.now()
+                )
+                
+                # Update order status if needed
+                order = shipment.order
+                if order and order.status not in ['DELIVERED']:
+                    order.status = 'CANCELLED'
+                    order.save()
+                
+                # Return success response
+                return Response({
+                    'success': True,
+                    'message': 'Shipment cancelled successfully',
+                    'shipment_id': shipment.id,
+                    'status': 'CANCELLED'
+                })
+            else:
+                # Return error from QuixGo API
+                error_message = cancel_response.get('error') or cancel_response.get('message', 'Unknown error')
+                logger.error(f"Failed to cancel shipment: {error_message}")
+                return Response({
+                    'success': False,
+                    'message': error_message
+                }, status=status.HTTP_400_BAD_REQUEST)
+                    
+        except Exception as e:
+            # Log the full exception for debugging
+            logger.error(f"Error in cancel shipment action: {str(e)}", exc_info=True)
             return Response({
-                'status': 'success',
-                'message': 'Shipment cancelled successfully'
-            })
-        else:
-            return Response(
-                {'error': 'Failed to cancel shipment', 'details': response['error']},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+                'success': False,
+                'message': f"Error cancelling shipment: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     def update_order_status(self, shipment):
         """Update the order status based on shipment status"""
