@@ -6655,77 +6655,139 @@ class ShipmentViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def track(self, request, pk=None):
-        """Track a shipment and update status"""
-        shipment = self.get_object()
-        
-        if not shipment.awb_number:
-            return Response(
-                {'error': 'No AWB number available for tracking'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        shipping_service = QuixGoShippingService()
-        response = shipping_service.track_shipment(shipment.awb_number)
-        
-        if response['success']:
-            # Update shipment status from tracking data
-            current_status = response['current_status']
-            status_mapping = {
-                'Booked': 'BOOKED',
-                'Picked Up': 'PICKED_UP',
-                'In Transit': 'IN_TRANSIT',
-                'Out For Delivery': 'OUT_FOR_DELIVERY',
-                'Delivered': 'DELIVERED',
-                'Undelivered': 'FAILED_DELIVERY',
-                'RTO': 'RETURNED',
-                'Cancelled': 'CANCELLED'
-            }
+        """Track a shipment and update its status"""
+        try:
+            shipment = self.get_object()
             
-            # Map QuixGo status to our status if possible
-            if current_status in status_mapping:
-                shipment.status = status_mapping[current_status]
+            if not shipment.awb_number:
+                return Response({
+                    'success': False,
+                    'message': 'No AWB number available for tracking'
+                }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Save status history
-            shipment.status_details = {
-                'last_updated': timezone.now().isoformat(),
-                'quixgo_status': current_status,
-                'history': response['status_history']
-            }
-            shipment.save()
+            # Initialize the shipping service
+            shipping_service = QuixGoShippingService()
             
-            # Create status update entries for each new status
-            for status_entry in response['status_history']:
-                # Check if we already have this status update
-                timestamp = timezone.now()
-                if 'updateDate' in status_entry and status_entry['updateDate']:
-                    try:
-                        timestamp = datetime.fromisoformat(status_entry['updateDate'].replace('Z', '+00:00'))
-                    except ValueError:
-                        pass
+            # Call the tracking API
+            tracking_response = shipping_service.track_shipment(shipment.awb_number)
+            
+            if tracking_response.get('success'):
+                # Extract status information from the response
+                current_status = tracking_response.get('current_status', 'Unknown')
+                status_history = tracking_response.get('status_history', [])
                 
-                ShipmentStatusUpdate.objects.get_or_create(
-                    shipment=shipment,
-                    status=status_entry.get('statusName', 'Unknown'),
-                    timestamp=timestamp,
-                    defaults={
-                        'status_details': status_entry.get('comment', ''),
-                        'location': status_entry.get('location', '')
+                # Map QuixGo status to our status
+                status_mapping = {
+                    'Manifested': 'BOOKED',
+                    'Picked Up': 'PICKED_UP',
+                    'In Transit': 'IN_TRANSIT',
+                    'Out For Delivery': 'OUT_FOR_DELIVERY',
+                    'Delivered': 'DELIVERED',
+                    'Undelivered': 'FAILED_DELIVERY',
+                    'RTO': 'RETURNED',
+                    'Cancelled': 'CANCELLED'
+                }
+                
+                # Update the shipment status if we have a mapping for it
+                if current_status in status_mapping:
+                    shipment.status = status_mapping[current_status]
+                
+                # Update shipment details with tracking information
+                shipment.status_details = {
+                    'last_updated': timezone.now().isoformat(),
+                    'quixgo_status': current_status,
+                    'history': status_history,
+                    'raw_data': tracking_response.get('raw_data')
+                }
+                shipment.save()
+                
+                # Create status update entries for each status in the history
+                for status_entry in status_history:
+                    # Extract timestamp from QuixGo status entry
+                    timestamp = timezone.now()
+                    if 'updateDate' in status_entry and status_entry['updateDate']:
+                        try:
+                            # Handle different date formats
+                            date_str = status_entry['updateDate']
+                            if 'T' in date_str:
+                                # ISO format
+                                if date_str.endswith('Z'):
+                                    from datetime import datetime
+                                    timestamp = datetime.strptime(date_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+                                else:
+                                    from datetime import datetime
+                                    timestamp = datetime.fromisoformat(date_str)
+                            else:
+                                # Standard format
+                                from datetime import datetime
+                                timestamp = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+                        except (ValueError, AttributeError) as e:
+                            logger.warning(f"Failed to parse date '{status_entry['updateDate']}': {str(e)}")
+                            # Fall back to current time
+                    
+                    status_name = status_entry.get('statusName', 'Unknown')
+                    status_comment = status_entry.get('comment', '')
+                    status_location = status_entry.get('location', '')
+                    
+                    # Check if this status update already exists to avoid duplicates
+                    existing = ShipmentStatusUpdate.objects.filter(
+                        shipment=shipment,
+                        status=status_name,
+                        status_details=status_comment
+                    ).exists()
+                    
+                    if not existing:
+                        ShipmentStatusUpdate.objects.create(
+                            shipment=shipment,
+                            status=status_name,
+                            status_details=status_comment,
+                            location=status_location,
+                            timestamp=timestamp
+                        )
+                
+                # Update order status if needed
+                self.update_order_status(shipment)
+                
+                # Format status history for frontend response
+                formatted_history = []
+                for item in status_history:
+                    formatted_item = {
+                        'status': item.get('statusName', 'Unknown'),
+                        'details': item.get('comment', ''),
+                        'location': item.get('location', ''),
+                        'timestamp': item.get('updateDate', '')
                     }
-                )
+                    formatted_history.append(formatted_item)
+                
+                # Return a well-structured response for the frontend
+                return Response({
+                    'success': True,
+                    'message': 'Shipment status updated successfully',
+                    'status': shipment.status,
+                    'current_status': current_status,
+                    'status_history': formatted_history,
+                    'last_updated': timezone.now().isoformat(),
+                    'tracking_link': self.get_tracking_link(shipment)
+                })
+            else:
+                # Log the error
+                logger.error(f"Failed to track shipment: {tracking_response.get('error')}")
+                
+                # Return the error to the frontend
+                return Response({
+                    'success': False,
+                    'message': f"Failed to track shipment: {tracking_response.get('error')}"
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        except Exception as e:
+            # Log any exceptions
+            logger.error(f"Error in track shipment action: {str(e)}", exc_info=True)
             
-            # Update order status if needed
-            self.update_order_status(shipment)
-            
+            # Return the error to the frontend
             return Response({
-                'status': shipment.status,
-                'status_history': response['status_history'],
-                'last_updated': timezone.now().isoformat()
-            })
-        else:
-            return Response(
-                {'error': 'Failed to track shipment', 'details': response['error']},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+                'success': False,
+                'message': f"Error tracking shipment: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):

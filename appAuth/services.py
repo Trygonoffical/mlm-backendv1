@@ -281,36 +281,98 @@ class QuixGoShippingService:
             }
     
     def track_shipment(self, awb_number):
-        """Track a shipment using AWB number"""
+        """Track a shipment using AWB number with the correct QuixGo API endpoint and response handling"""
         try:
             if not self.token:
                 self.login()
                 
-            url = f"{self.api_base_url}/trackStatus"
+            # Use the correct QuixGo tracking endpoint from the curl example
+            url = "https://api.quixgo.com/web/shipmentStatus/getStatus"
             
+            # Format payload according to the curl example
             payload = {
-                "awbNumber": awb_number
+                "awbNumber": awb_number,
+                "serviceProvider": "QUIXGO"  # This appears to be a fixed value in the example
             }
             
-            response = requests.post(url, headers=self.get_auth_header(), json=payload)
+            headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json, text/plain, */*',
+            }
             
-            if response.status_code == 200:
-                data = response.json()
-                shipment_info = data.get('shipmentInfo', {})
-                return {
-                    'success': True,
-                    'current_status': shipment_info.get('currentStatus'),
-                    'status_history': shipment_info.get('statusHistory', []),
-                    'data': shipment_info
-                }
-            else:
-                logger.error(f"Failed to track shipment: {response.text}")
+            # Log the request for debugging
+            logger.info(f"Sending tracking request for AWB {awb_number} to QuixGo API")
+            logger.debug(f"Tracking request payload: {payload}")
+            
+            response = requests.post(url, headers=headers, json=payload)
+            
+            # Log the response status
+            logger.debug(f"QuixGo tracking response status: {response.status_code}")
+            
+            # Handle non-200 responses
+            if response.status_code != 200:
+                logger.error(f"QuixGo tracking API error: {response.text}")
                 return {
                     'success': False,
-                    'error': response.text
+                    'error': f"API returned status code {response.status_code}: {response.text}"
                 }
+            
+            try:
+                # Parse the JSON response
+                response_data = response.json()
                 
+                # Log the full response for debugging
+                logger.debug(f"QuixGo tracking response: {response_data}")
+                
+                # Extract shipment info from the response - matching the exact structure you shared
+                shipment_info = response_data.get('shipmentInfo', {})
+                status_info = response_data.get('status', {}).get('data', {})
+                
+                # Combine status history from both locations in the response if they exist
+                status_history = []
+                if 'statusHistory' in shipment_info:
+                    status_history.extend(shipment_info['statusHistory'])
+                
+                # Also check if there's status history in the status.data section
+                if 'statusHistory' in status_info:
+                    # Check for duplicates before adding
+                    existing_updates = set((item.get('statusName', ''), item.get('updateDate', '')) 
+                                        for item in status_history)
+                    
+                    for update in status_info['statusHistory']:
+                        update_key = (update.get('statusName', ''), update.get('updateDate', ''))
+                        if update_key not in existing_updates:
+                            status_history.append(update)
+                            existing_updates.add(update_key)
+                
+                # Get the current status from either location
+                current_status = shipment_info.get('currentStatus') or status_info.get('currentStatus', 'Unknown')
+                
+                # Return success with all the extracted data
+                return {
+                    'success': True,
+                    'current_status': current_status,
+                    'status_history': status_history,
+                    'raw_data': response_data,
+                    'shipment_info': shipment_info,
+                    'order_id': shipment_info.get('orderId'),
+                    'shipment_id': shipment_info.get('shipmentId'),
+                    'courier': shipment_info.get('shipmentPartner'),
+                    'booking_date': shipment_info.get('bookingDate'),
+                    'service_type': shipment_info.get('serviceTypes')
+                }
+                    
+            except ValueError as json_error:
+                # Handle JSON parsing errors
+                logger.error(f"Error parsing QuixGo tracking response: {str(json_error)}")
+                logger.error(f"Raw response: {response.text}")
+                return {
+                    'success': False,
+                    'error': 'Invalid response format from tracking API'
+                }
+                    
         except Exception as e:
+            # Handle any other exceptions
             logger.error(f"Error tracking shipment: {str(e)}")
             return {
                 'success': False,
