@@ -63,7 +63,7 @@ urlpatterns = [
     path('token/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
 
     #paymnet Verification
-    path('create-order/', CreateOrderView.as_view(), name='create_order'),
+#     path('create-order/', CreateOrderView.as_view(), name='create_order'),
     path('verify-payment/', VerifyPaymentView.as_view(), name='verify_payment'),
 
     # Customer Profile update

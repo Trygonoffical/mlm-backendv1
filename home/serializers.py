@@ -1453,23 +1453,77 @@ class ShippingAddressSerializer(serializers.ModelSerializer):
         model = ShippingAddress
         fields = ['name', 'street_address', 'city', 'state', 'postal_code']
 
+# class OrderSerializer(serializers.ModelSerializer):
+#     items = OrderItemSerializer(many=True, read_only=True)
+#     user = serializers.SerializerMethodField()
+#     shipping_details = ShippingAddressSerializer(read_only=True)
+#     # Or use SerializerMethodField
+#     final_amount_display = serializers.SerializerMethodField()
+
+#     def get_final_amount_display(self, obj):
+#         return float(obj.final_amount)
+#     class Meta:
+#         model = Order
+#         fields = [
+#             'id', 'order_number', 'order_date', 'status',
+#             'total_amount', 'discount_amount', 'final_amount',
+#             'final_amount_display', 'shipping_address', 'billing_address', 'total_bp',
+#             'items' ,'user' , 'shipping_details'
+#         ]
+#     def get_user(self, obj):
+#         # Return a dictionary with user details
+#         return {
+#             'first_name': obj.user.first_name,
+#             'last_name': obj.user.last_name,
+#             'email': obj.user.email,
+#             'phone_number': obj.user.phone_number
+#         }
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     user = serializers.SerializerMethodField()
     shipping_details = ShippingAddressSerializer(read_only=True)
-    # Or use SerializerMethodField
     final_amount_display = serializers.SerializerMethodField()
+    payment_type = serializers.CharField(source='get_orderType_display', read_only=True)
+    shipments = serializers.SerializerMethodField()
 
     def get_final_amount_display(self, obj):
         return float(obj.final_amount)
+        
+    def get_shipments(self, obj):
+        """Get shipment information for the order"""
+        try:
+            shipments = Shipment.objects.filter(order=obj)
+            return [
+                {
+                    'id': shipment.id,
+                    'awb_number': shipment.awb_number,
+                    'courier_name': shipment.courier_name,
+                    'status': shipment.status,
+                    'tracking_url': shipment.tracking_url,
+                    'created_at': shipment.created_at,
+                    'status_updates': [
+                        {
+                            'status': update.status,
+                            'status_details': update.status_details,
+                            'location': update.location,
+                            'timestamp': update.timestamp
+                        } for update in ShipmentStatusUpdate.objects.filter(shipment=shipment).order_by('-timestamp')
+                    ]
+                } for shipment in shipments
+            ]
+        except Exception as e:
+            logger.error(f"Error retrieving shipment data: {str(e)}")
+            return []
+
     class Meta:
         model = Order
         fields = [
             'id', 'order_number', 'order_date', 'status',
             'total_amount', 'discount_amount', 'final_amount',
             'final_amount_display', 'shipping_address', 'billing_address', 'total_bp',
-            'items' ,'user' , 'shipping_details'
+            'items', 'user', 'shipping_details', 'payment_type', 'orderType', 'shipments'
         ]
+        
     def get_user(self, obj):
         # Return a dictionary with user details
         return {
@@ -1478,7 +1532,6 @@ class OrderSerializer(serializers.ModelSerializer):
             'email': obj.user.email,
             'phone_number': obj.user.phone_number
         }
-
 
 class BankDetailsSerializer(serializers.ModelSerializer):
     class Meta:
