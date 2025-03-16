@@ -13,48 +13,93 @@ def update_bp_points_on_order(order):
     Update BP points when an order is placed and confirmed
     """
     try:
-        # Only process confirmed/completed orders
+        # Check if order is in a valid status
         if order.status not in ['CONFIRMED', 'SHIPPED', 'DELIVERED']:
-            logger.info(f"Order {order.id} status is {order.status}, not updating BP")
+            logger.warning(f"Cannot update BP for order {order.id} with status {order.status}")
             return False
             
-        # Get member if user is MLM member
-        if order.user.role != 'MLM_MEMBER':
-            logger.info(f"User {order.user.id} is not MLM_MEMBER, not updating BP")
+        # Check if BP was already processed
+        if order.bp_processed:
+            logger.info(f"BP already processed for order {order.id}")
             return False
             
-        member = order.user.mlm_profile
-        logger.info(f"Processing BP update for member {member.member_id} from order {order.id}")
+        # Check if user is an MLM member
+        user = order.user
+        if user.role != 'MLM_MEMBER' or not hasattr(user, 'mlm_profile'):
+            logger.info(f"User {user.id} is not an MLM member, skipping BP update")
+            return False
+            
+        mlm_member = user.mlm_profile
+        
+        # Get total BP for this order
+        total_bp = order.total_bp
         
         with transaction.atomic():
-
-            if hasattr(order, 'bp_processed') and order.bp_processed:
-                logger.info(f"Order {order.id} already processed for BP, skipping")
-                return False
-            # Add BP points from order to member
-            old_bp = member.total_bp
+            # Add BP points with capping for Level 1
+            actual_bp_added = mlm_member.add_bp(total_bp)
             
-            member.total_bp += order.total_bp
+            # Update current month purchase
+            mlm_member.current_month_purchase += order.final_amount
+            mlm_member.save(update_fields=['current_month_purchase'])
             
-            # Update monthly purchase amount
-            member.current_month_purchase += order.final_amount
-            member.save()
-            
-            # Mark order as processed for BP
+            # Mark BP as processed
             order.bp_processed = True
             order.save(update_fields=['bp_processed'])
-
-            logger.info(f"Updated BP for {member.member_id}: {old_bp} → {member.total_bp}")
             
-            # Check for position upgrade
-            if member.check_position_upgrade():
-                logger.info(f"Member {member.member_id} upgraded position to {member.position.name}")
-                
+            # Log the actual BP added
+            logger.info(f"Added {actual_bp_added} BP to member {mlm_member.member_id} (capped from {total_bp})")
+            
+            # Check for position upgrade (won't affect Level 1)
+            mlm_member.check_position_upgrade()
+            
             return True
             
     except Exception as e:
-        logger.error(f"Error updating BP points on order {order.id}: {str(e)}")
+        logger.error(f"Error updating BP points for order {order.id}: {str(e)}")
         return False
+    # try:
+    #     # Only process confirmed/completed orders
+    #     if order.status not in ['CONFIRMED', 'SHIPPED', 'DELIVERED']:
+    #         logger.info(f"Order {order.id} status is {order.status}, not updating BP")
+    #         return False
+            
+    #     # Get member if user is MLM member
+    #     if order.user.role != 'MLM_MEMBER':
+    #         logger.info(f"User {order.user.id} is not MLM_MEMBER, not updating BP")
+    #         return False
+            
+    #     member = order.user.mlm_profile
+    #     logger.info(f"Processing BP update for member {member.member_id} from order {order.id}")
+        
+    #     with transaction.atomic():
+
+    #         if hasattr(order, 'bp_processed') and order.bp_processed:
+    #             logger.info(f"Order {order.id} already processed for BP, skipping")
+    #             return False
+    #         # Add BP points from order to member
+    #         old_bp = member.total_bp
+            
+    #         member.total_bp += order.total_bp
+            
+    #         # Update monthly purchase amount
+    #         member.current_month_purchase += order.final_amount
+    #         member.save()
+            
+    #         # Mark order as processed for BP
+    #         order.bp_processed = True
+    #         order.save(update_fields=['bp_processed'])
+
+    #         logger.info(f"Updated BP for {member.member_id}: {old_bp} → {member.total_bp}")
+            
+    #         # Check for position upgrade
+    #         if member.check_position_upgrade():
+    #             logger.info(f"Member {member.member_id} upgraded position to {member.position.name}")
+                
+    #         return True
+            
+    # except Exception as e:
+    #     logger.error(f"Error updating BP points on order {order.id}: {str(e)}")
+    #     return False
 
 def reverse_bp_points_on_order_cancellation(order):
     """
@@ -568,6 +613,10 @@ def get_member_monthly_purchases(member, start_date, end_date):
 def upgrade_position(member):
     """Check and upgrade member's position based on BP points"""
     try:
+
+        if member.position.level_order == 1:
+            return False
+        
         # Find the highest position the member qualifies for based on BP points
         eligible_position = Position.objects.filter(
             bp_required_min__lte=member.total_bp,

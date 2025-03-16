@@ -34,6 +34,7 @@ from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
 import time 
 import razorpay
+from django.db import models
 from django.shortcuts import get_object_or_404
 from django.http import FileResponse
 from utils.invoice_generator import generate_invoice_pdf
@@ -2119,6 +2120,9 @@ class OrderProcessView(APIView):
     
     def check_position_upgrade(self, mlm_member):
         """Check and upgrade position based on BP points"""
+        if self.position.level_order == 1:
+            return False
+        
         higher_position = Position.objects.filter(
             bp_required_min__lte=mlm_member.total_bp,
             level_order__gt=mlm_member.position.level_order,
@@ -4992,6 +4996,17 @@ class MLMLiveCommissionView(APIView):
                     'error': 'Member not found'
                 }, status=status.HTTP_404_NOT_FOUND)
             
+            # Check monthly quota status
+            monthly_quota_status = member.check_monthly_quota_maintenance()
+
+            # Calculate monthly quota remaining
+            monthly_quota_remaining = Decimal('0.00')
+            if not monthly_quota_status:
+                # Calculate remaining amount needed to meet monthly quota
+                current_month_purchase = member.current_month_purchase or Decimal('0.00')
+                monthly_quota = member.position.monthly_quota
+                monthly_quota_remaining = max(Decimal('0.00'), monthly_quota - current_month_purchase)
+
             # Check if member's position can earn commissions
             if not member.position.can_earn_commission:
                 return Response({
@@ -5044,7 +5059,9 @@ class MLMLiveCommissionView(APIView):
                 'total_pending': str(total_pending),
                 'level_breakdown': level_breakdown,
                 'top_performers': top_performers,
-                'recent_transactions': recent_transactions
+                'recent_transactions': recent_transactions,
+                'monthly_quota_status': monthly_quota_status,
+                'monthly_quota_remaining': str(monthly_quota_remaining)
             })
             
         except Exception as e:
@@ -5347,6 +5364,7 @@ class MLMLiveCommissionView(APIView):
             logger.error(f"Error checking monthly quota: {str(e)}")
             return "PENDING", 0
 
+    
 
 class AdminCustomerViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -7206,6 +7224,17 @@ class LiveCommissionDashboardView(APIView):
                     'message': 'Only MLM members and admins can access this dashboard'
                 }, status=status.HTTP_403_FORBIDDEN)
                 
+            # Check monthly quota status
+            monthly_quota_status = member.check_monthly_quota_maintenance()
+            
+            # Calculate monthly quota remaining
+            monthly_quota_remaining = Decimal('0.00')
+            if not monthly_quota_status:
+                # Calculate remaining amount needed to meet monthly quota
+                current_month_purchase = member.current_month_purchase or Decimal('0.00')
+                monthly_quota = member.position.monthly_quota
+                monthly_quota_remaining = max(Decimal('0.00'), monthly_quota - current_month_purchase)
+
             # Check if the member has an active position that can earn commissions
             if not member.position.can_earn_commission:
                 return Response({
@@ -7263,7 +7292,14 @@ class LiveCommissionDashboardView(APIView):
                 'total_pending': str(total_pending),
                 'level_breakdown': level_breakdown,
                 'top_performers': top_performers,
-                'recent_transactions': recent_transactions
+                'recent_transactions': recent_transactions,
+                'monthly_quota_status': monthly_quota_status,
+                'monthly_quota_remaining': str(monthly_quota_remaining),
+                'next_calculation_date': first_day_current_month.replace(
+                    month=first_day_current_month.month+1 if first_day_current_month.month < 12 else 1, 
+                    year=first_day_current_month.year if first_day_current_month.month < 12 else first_day_current_month.year+1
+                ).strftime('%Y-%m-%d'),
+                'current_month': first_day_current_month.strftime('%B %Y')
             }
             
             return Response({

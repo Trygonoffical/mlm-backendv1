@@ -457,6 +457,9 @@ class MLMMember(models.Model):
 
     def check_position_upgrade(self):
         """Check and upgrade position based on BP points"""
+        if self.position.level_order == 1:
+            return False
+        
         higher_position = Position.objects.filter(
             bp_required_min__lte=self.total_bp,
             level_order__gt=self.position.level_order,
@@ -478,6 +481,43 @@ class MLMMember(models.Model):
 
         return False
     
+    def add_bp(self, bp_points):
+        """
+        Add BP points with cap for Level 1 (Preferred Customer)
+        
+        Args:
+            bp_points: The BP points to add
+            
+        Returns:
+            int: The actual BP points added
+        """
+        # Check if this is a Level 1 position (Preferred Customer)
+        is_preferred_customer = self.position.level_order == 1
+        
+        if is_preferred_customer:
+            # Cap BP at 99 for Preferred Customers
+            max_bp = 99
+            current_bp = self.total_bp
+            
+            # Calculate how many points we can add without exceeding the cap
+            points_to_add = min(bp_points, max_bp - current_bp)
+            
+            # If already at or over cap, add no points
+            if points_to_add <= 0:
+                return 0
+                
+            # Update BP with capped value
+            self.total_bp += points_to_add
+            self.save(update_fields=['total_bp'])
+            
+            return points_to_add
+        else:
+            # For higher levels, add BP normally
+            self.total_bp += bp_points
+            self.save(update_fields=['total_bp'])
+            
+            return bp_points
+        
     def toggle_status(self):
         """Toggle status for both MLMMember and associated User"""
         from django.db import transaction
