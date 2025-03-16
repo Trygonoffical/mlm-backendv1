@@ -1485,6 +1485,7 @@ class OrderSerializer(serializers.ModelSerializer):
     final_amount_display = serializers.SerializerMethodField()
     payment_type = serializers.CharField(source='get_orderType_display', read_only=True)
     shipments = serializers.SerializerMethodField()
+    shipping_charges = serializers.SerializerMethodField()
 
     def get_final_amount_display(self, obj):
         return float(obj.final_amount)
@@ -1501,6 +1502,8 @@ class OrderSerializer(serializers.ModelSerializer):
                     'status': shipment.status,
                     'tracking_url': shipment.tracking_url,
                     'created_at': shipment.created_at,
+                    'shipping_charge': float(shipment.shipping_charge) if shipment.shipping_charge else 0,
+                    'service_type': shipment.service_type,
                     'status_updates': [
                         {
                             'status': update.status,
@@ -1514,6 +1517,16 @@ class OrderSerializer(serializers.ModelSerializer):
         except Exception as e:
             logger.error(f"Error retrieving shipment data: {str(e)}")
             return []
+            
+    def get_shipping_charges(self, obj):
+        """Calculate total shipping charges from all shipments"""
+        try:
+            shipments = Shipment.objects.filter(order=obj)
+            total_shipping = sum(float(s.shipping_charge or 0) for s in shipments)
+            return total_shipping
+        except Exception as e:
+            logger.error(f"Error calculating shipping charges: {str(e)}")
+            return 0
 
     class Meta:
         model = Order
@@ -1521,7 +1534,8 @@ class OrderSerializer(serializers.ModelSerializer):
             'id', 'order_number', 'order_date', 'status',
             'total_amount', 'discount_amount', 'final_amount',
             'final_amount_display', 'shipping_address', 'billing_address', 'total_bp',
-            'items', 'user', 'shipping_details', 'payment_type', 'orderType', 'shipments'
+            'items', 'user', 'shipping_details', 'payment_type', 'orderType', 
+            'shipments', 'shipping_charges'
         ]
         
     def get_user(self, obj):
