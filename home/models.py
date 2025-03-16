@@ -2102,3 +2102,24 @@ class ShippingAddress(models.Model):
     
     def __str__(self):
         return f"Shipping for {self.order.order_number}"
+
+
+
+
+class ShippingRate(models.Model):
+    is_free_shipping = models.BooleanField(default=False)
+    base_rate = models.DecimalField(max_digits=10, decimal_places=2, default=100.00)
+    tax_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=18.00)
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'shipping_rate'
+        
+    @classmethod
+    def get_active_config(cls):
+        """Get active shipping configuration"""
+        config = cls.objects.filter(is_active=True).first()
+        if not config:
+            config = cls.objects.create()
+        return config

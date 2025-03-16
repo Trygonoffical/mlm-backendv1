@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate , ShippingAddress
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate , ShippingAddress , ShippingRate
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -8793,3 +8793,77 @@ def track_by_awb(request):
         return Response({
             'error': 'An error occurred while tracking the shipment'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+
+class ShippingInternalRateView(APIView):
+    permission_classes = [IsAdminUser]  # Only admins can change shipping settings
+    
+    def get(self, request):
+        """Get current shipping configuration"""
+        config = ShippingRate.get_active_config()
+        return Response({
+            'is_free_shipping': config.is_free_shipping,
+            'base_rate': float(config.base_rate),
+            'tax_percentage': float(config.tax_percentage),
+            'is_active': config.is_active,
+            'total_shipping_cost': 0 if config.is_free_shipping else 
+                float(config.base_rate * (1 + config.tax_percentage / 100))
+        })
+    
+    def post(self, request):
+        """Update shipping configuration"""
+        config = ShippingRate.get_active_config()
+        
+        # Update fields from request data
+        is_free_shipping = request.data.get('is_free_shipping')
+        if is_free_shipping is not None:
+            config.is_free_shipping = is_free_shipping
+        
+        base_rate = request.data.get('base_rate')
+        if base_rate is not None:
+            config.base_rate = Decimal(str(base_rate))
+        
+        tax_percentage = request.data.get('tax_percentage')
+        if tax_percentage is not None:
+            config.tax_percentage = Decimal(str(tax_percentage))
+        
+        is_active = request.data.get('is_active')
+        if is_active is not None:
+            config.is_active = is_active
+        
+        config.save()
+        
+        return Response({
+            'success': True,
+            'message': 'Shipping configuration updated successfully',
+            'config': {
+                'is_free_shipping': config.is_free_shipping,
+                'base_rate': float(config.base_rate),
+                'tax_percentage': float(config.tax_percentage),
+                'is_active': config.is_active,
+                'total_shipping_cost': 0 if config.is_free_shipping else 
+                    float(config.base_rate * (1 + config.tax_percentage / 100))
+            }
+        })
+    
+# Add to your public APIs for getting shipping costs in the cart/checkout
+class PublicShippingRateView(APIView):
+    permission_classes = [AllowAny]  # Public access
+    
+    def get(self, request):
+        """Get current shipping configuration for public use (checkout)"""
+        config = ShippingRate.get_active_config()
+        
+        # Calculate total shipping cost
+        total_shipping = 0
+        if not config.is_free_shipping and config.is_active:
+            shipping_tax = config.base_rate * (config.tax_percentage / 100)
+            total_shipping = float(config.base_rate + shipping_tax)
+        
+        return Response({
+            'is_free_shipping': config.is_free_shipping,
+            'shipping_cost': float(config.base_rate),
+            'shipping_tax_percentage': float(config.tax_percentage),
+            'total_shipping_cost': total_shipping
+        })
