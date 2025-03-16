@@ -533,6 +533,39 @@ class MLMMember(models.Model):
             
         return self.is_active
     
+    # def check_monthly_quota_maintenance(self, month=None):
+    #     """
+    #     Check if the member has met their monthly purchase quota
+        
+    #     Args:
+    #         month (datetime, optional): Month to check. 
+    #                                     Defaults to current month.
+        
+    #     Returns:
+    #         bool: Whether monthly quota is maintained
+    #     """
+    #     if not month:
+    #         month = timezone.now()
+        
+    #     # Calculate total purchases for the given month
+    #     total_monthly_purchases = Order.objects.filter(
+    #         user=self.user,
+    #         order_date__year=month.year,
+    #         order_date__month=month.month,
+    #         status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+    #     ).aggregate(
+    #         total_purchase=models.Sum('final_amount')
+    #     )['total_purchase'] or Decimal('0.00')
+        
+    #     # Compare with position's monthly quota
+    #     quota_maintained = total_monthly_purchases >= self.position.monthly_quota
+        
+    #     # Update the monthly_quota_maintained field
+    #     if self.monthly_quota_maintained != quota_maintained:
+    #         self.monthly_quota_maintained = quota_maintained
+    #         self.save(update_fields=['monthly_quota_maintained'])
+            
+    #     return quota_maintained
     def check_monthly_quota_maintenance(self, month=None):
         """
         Check if the member has met their monthly purchase quota
@@ -544,28 +577,51 @@ class MLMMember(models.Model):
         Returns:
             bool: Whether monthly quota is maintained
         """
+        from django.db.models import Sum
+        from django.utils import timezone
+        from decimal import Decimal
+        
         if not month:
             month = timezone.now()
         
-        # Calculate total purchases for the given month
-        total_monthly_purchases = Order.objects.filter(
-            user=self.user,
-            order_date__year=month.year,
-            order_date__month=month.month,
-            status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
-        ).aggregate(
-            total_purchase=models.Sum('final_amount')
-        )['total_purchase'] or Decimal('0.00')
-        
-        # Compare with position's monthly quota
-        quota_maintained = total_monthly_purchases >= self.position.monthly_quota
-        
-        # Update the monthly_quota_maintained field
-        if self.monthly_quota_maintained != quota_maintained:
-            self.monthly_quota_maintained = quota_maintained
-            self.save(update_fields=['monthly_quota_maintained'])
+        try:
+            # Get the member's monthly quota requirement
+            monthly_quota = self.position.monthly_quota or Decimal('0.00')
             
-        return quota_maintained
+            # Calculate total purchases for the given month
+            total_monthly_purchases = Order.objects.filter(
+                user=self.user,
+                order_date__year=month.year,
+                order_date__month=month.month,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            ).aggregate(
+                total_purchase=Sum('final_amount')
+            )['total_purchase'] or Decimal('0.00')
+            
+            # Special case: If monthly quota is 0, always return True
+            if monthly_quota <= 0:
+                quota_maintained = True
+            else:
+                # Compare with position's monthly quota
+                quota_maintained = total_monthly_purchases >= monthly_quota
+            
+            # Log the values for debugging
+            print(f"Member {self.member_id}: Monthly quota = {monthly_quota}, " 
+                f"Total purchases = {total_monthly_purchases}, " 
+                f"Is maintained: {quota_maintained}")
+            
+            # Update the monthly_quota_maintained field
+            if not hasattr(self, 'monthly_quota_maintained') or self.monthly_quota_maintained != quota_maintained:
+                self.monthly_quota_maintained = quota_maintained
+                self.save(update_fields=['monthly_quota_maintained'])
+            
+            return quota_maintained
+            
+        except Exception as e:
+            # Log any errors
+            print(f"Error checking monthly quota for member {self.member_id}: {str(e)}")
+            # Default to False in case of errors
+            return False
         
     def get_current_month_commission_estimate(self):
         """
