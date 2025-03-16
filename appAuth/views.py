@@ -2116,7 +2116,19 @@ class OrderProcessView(APIView):
     
     def calculate_shipping(self, subtotal):
         """Calculate shipping cost based on subtotal"""
-        return Decimal('0.00') if subtotal > 0 else Decimal('0.00')
+        # Get active shipping configuration
+        shipping_config = ShippingRate.get_active_config()
+        
+        # If free shipping is enabled, return 0
+        if shipping_config.is_free_shipping:
+            return Decimal('0.00')
+            
+        # Otherwise calculate shipping with tax
+        base_rate = shipping_config.base_rate
+        tax_percentage = shipping_config.tax_percentage
+        shipping_tax = (base_rate * tax_percentage) / 100
+        
+        return base_rate + shipping_tax
     
     def check_position_upgrade(self, mlm_member):
         """Check and upgrade position based on BP points"""
@@ -2139,6 +2151,8 @@ class OrderProcessView(APIView):
         try:
             # Get cart items (only need product IDs and quantities)
             cart_items = request.data.get('items', [])
+            order_type = request.data.get('orderType', 'ONLINE')  # Default to ONLINE if not specified
+            
             if not cart_items:
                 return Response({
                     'status': 'error',
@@ -2213,6 +2227,11 @@ class OrderProcessView(APIView):
             shipping_cost = self.calculate_shipping(subtotal - total_discount)
             final_total = subtotal - total_discount + total_gst + shipping_cost
 
+            # Set initial order status based on payment type
+            initial_status = 'PENDING'
+            if order_type == 'COD':
+                initial_status = 'CONFIRMED'  # For COD orders, set as CONFIRMED immediately
+
             # Create order
             order = Order.objects.create(
                 user=request.user,
@@ -2223,7 +2242,9 @@ class OrderProcessView(APIView):
                 shipping_address=f"{default_address.name}, {default_address.street_address}, {default_address.city}, {default_address.state}, {default_address.postal_code}",
                 billing_address=f"{default_address.name}, {default_address.street_address}, {default_address.city}, {default_address.state}, {default_address.postal_code}",
                 total_bp=total_bp_points,
-                status='PENDING'
+                status=initial_status,
+                orderType=order_type,
+                discount_percentage=discount_percentage
             )
 
             # Create shipping address record
@@ -2250,47 +2271,57 @@ class OrderProcessView(APIView):
                     bp_points=item['bp_points']
                 )
 
-            # Update MLM member data if applicable
-            # if request.user.role == 'MLM_MEMBER':
-            #     mlm_member = request.user.mlm_profile
-            #     mlm_member.total_bp += total_bp_points
-            #     mlm_member.current_month_purchase += final_total
-            #     mlm_member.save()
+            # For COD orders, process BP points immediately
+            if order_type == 'COD':
+                from home.utils import update_bp_points_on_order
+                update_bp_points_on_order(order)
                 
-            #     # Check for position upgrade
-            #     # mlm_member.check_position_upgrade()
-            #     self.check_position_upgrade(mlm_member)
+                # Update stock for COD orders
+                for item in order_items:
+                    product = item['product']
+                    quantity = item['quantity']
+                    # Update stock
+                    if product.stock >= quantity:
+                        product.stock -= quantity
+                        product.save()
 
-            # Create Razorpay order
-            client = razorpay.Client(
-                auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
-            )
+                # Send order confirmation for COD
+                self.send_cod_order_confirmation(order)
 
-            payment_data = {
-                'amount': int(final_total * 100),  # Convert to paise
-                'currency': 'INR',
-                'receipt': order.order_number,
-                'payment_capture': 1,
-                'notes': {
-                    'order_id': order.id,
-                    'shipping_address': order.shipping_address,
-                    'is_mlm_member': str(request.user.role == 'MLM_MEMBER'),
-                    'discount_applied': str(discount_percentage) + '%' if discount_percentage > 0 else 'No'
+            # If it's an online payment, create Razorpay order
+            razorpay_order = None
+            if order_type == 'ONLINE':
+                # Create Razorpay order
+                client = razorpay.Client(
+                    auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+                )
+
+                payment_data = {
+                    'amount': int(final_total * 100),  # Convert to paise
+                    'currency': 'INR',
+                    'receipt': order.order_number,
+                    'payment_capture': 1,
+                    'notes': {
+                        'order_id': order.id,
+                        'shipping_address': order.shipping_address,
+                        'is_mlm_member': str(request.user.role == 'MLM_MEMBER'),
+                        'discount_applied': str(discount_percentage) + '%' if discount_percentage > 0 else 'No'
+                    }
                 }
-            }
-            
-            razorpay_order = client.order.create(payment_data)
-            
-            # Update order with razorpay order id
-            order.razorpay_order_id = razorpay_order['id']
-            order.save()
+                
+                razorpay_order = client.order.create(payment_data)
+                
+                # Update order with razorpay order id
+                order.razorpay_order_id = razorpay_order['id']
+                order.save()
 
             return Response({
                 'status': 'success',
                 'order_id': order.id,
-                'razorpay_order_id': razorpay_order['id'],
-                'amount': razorpay_order['amount'],
-                'currency': razorpay_order['currency'],
+                'order_number': order.order_number,
+                'razorpay_order_id': razorpay_order['id'] if razorpay_order else None,
+                'amount': int(final_total * 100) if razorpay_order else float(final_total),
+                'currency': 'INR',
                 'order_summary': {
                     'subtotal': float(subtotal),
                     'discount': {
@@ -2315,6 +2346,225 @@ class OrderProcessView(APIView):
                 'status': 'error',
                 'message': 'An unexpected error occurred'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    def send_cod_order_confirmation(self, order):
+        """Send confirmation SMS and email for COD orders"""
+        try:
+            # Send SMS confirmation if phone number is available
+            if order.user.phone_number:
+                msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+                message = f"Thank you for your COD order #{order.order_number}. Your order has been confirmed and will be shipped soon. Total: ₹{order.final_amount}"
+                
+                msg91_service.send_transactional_sms(
+                    order.user.phone_number, 
+                    message
+                )
+            
+            # Send email confirmation if email is available
+            if order.user.email:
+                subject = f"Your COD Order #{order.order_number} is Confirmed"
+                context = {
+                    'order': order,
+                    'user': order.user,
+                    'items': order.items.all(),
+                    'is_cod': True
+                }
+                
+                html_message = render_to_string('emails/order_confirmation.html', context)
+                plain_message = strip_tags(html_message)
+                
+                send_mail(
+                    subject,
+                    plain_message,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [order.user.email],
+                    html_message=html_message,
+                    fail_silently=True
+                )
+                
+        except Exception as e:
+            logger.error(f"Error sending COD order confirmation: {str(e)}")
+            # Don't raise exception as this shouldn't block order creation
+    # def post(self, request):
+    #     try:
+    #         # Get cart items (only need product IDs and quantities)
+    #         cart_items = request.data.get('items', [])
+    #         if not cart_items:
+    #             return Response({
+    #                 'status': 'error',
+    #                 'message': 'Cart is empty'
+    #             }, status=status.HTTP_400_BAD_REQUEST)
+            
+    #         # Get default address
+    #         default_address = Address.objects.filter(
+    #             user=request.user, 
+    #             is_active=True
+    #         ).first()
+            
+    #         if not default_address:
+    #             return Response({
+    #                 'status': 'error',
+    #                 'message': 'No default address found'
+    #             }, status=status.HTTP_400_BAD_REQUEST)
+            
+    #         # Get MLM discount percentage if applicable
+    #         discount_percentage = 0
+    #         if request.user.role == 'MLM_MEMBER':
+    #             discount_percentage = request.user.mlm_profile.position.discount_percentage
+
+    #         # Initialize totals
+    #         subtotal = Decimal('0.00')
+    #         total_discount = Decimal('0.00')
+    #         total_gst = Decimal('0.00')
+    #         total_bp_points = 0
+    #         order_items = []
+
+    #         # Calculate totals for each item
+    #         for item in cart_items:
+    #             try:
+    #                 product = Product.objects.get(id=item['id'])
+    #                 quantity = int(item['quantity'])
+
+    #                 # Validate quantity
+    #                 if quantity <= 0:
+    #                     raise ValueError(f"Invalid quantity for product {product.name}")
+    #                 if quantity > product.stock:
+    #                     raise ValueError(f"Not enough stock for {product.name}")
+
+    #                 # Calculate item totals with MLM discount if applicable
+    #                 item_totals = self.calculate_item_totals(
+    #                     product, 
+    #                     quantity, 
+    #                     discount_percentage
+    #                 )
+                    
+    #                 subtotal += item_totals['base_price'] * quantity
+    #                 total_discount += item_totals['discount_amount']
+    #                 total_gst += item_totals['gst_amount']
+    #                 total_bp_points += item_totals['bp_points']
+
+    #                 order_items.append({
+    #                     'product': product,
+    #                     'quantity': quantity,
+    #                     'price': item_totals['base_price'],
+    #                     'discount_amount': item_totals['discount_amount'],
+    #                     'gst_amount': item_totals['gst_amount'],
+    #                     'total_price': item_totals['total_price'],
+    #                     'bp_points': item_totals['bp_points']
+    #                 })
+
+    #             except Product.DoesNotExist:
+    #                 return Response({
+    #                     'status': 'error',
+    #                     'message': f'Product with ID {item["id"]} not found'
+    #                 }, status=status.HTTP_400_BAD_REQUEST)
+
+    #         # Calculate shipping and final total
+    #         shipping_cost = self.calculate_shipping(subtotal - total_discount)
+    #         final_total = subtotal - total_discount + total_gst + shipping_cost
+
+    #         # Create order
+    #         order = Order.objects.create(
+    #             user=request.user,
+    #             order_number=self.generate_order_number(),
+    #             total_amount=subtotal,
+    #             discount_amount=total_discount,
+    #             final_amount=final_total,
+    #             shipping_address=f"{default_address.name}, {default_address.street_address}, {default_address.city}, {default_address.state}, {default_address.postal_code}",
+    #             billing_address=f"{default_address.name}, {default_address.street_address}, {default_address.city}, {default_address.state}, {default_address.postal_code}",
+    #             total_bp=total_bp_points,
+    #             status='PENDING'
+    #         )
+
+    #         # Create shipping address record
+    #         ShippingAddress.objects.create(
+    #             order=order,
+    #             name=default_address.name,
+    #             street_address=default_address.street_address,
+    #             city=default_address.city,
+    #             state=default_address.state,
+    #             postal_code=default_address.postal_code,
+    #         )
+
+    #         # Create order items
+    #         for item in order_items:
+    #             OrderItem.objects.create(
+    #                 order=order,
+    #                 product=item['product'],
+    #                 quantity=item['quantity'],
+    #                 price=item['price'],
+    #                 discount_percentage=discount_percentage,
+    #                 discount_amount=item['discount_amount'],
+    #                 gst_amount=item['gst_amount'],
+    #                 final_price=item['total_price'],
+    #                 bp_points=item['bp_points']
+    #             )
+
+    #         # Update MLM member data if applicable
+    #         # if request.user.role == 'MLM_MEMBER':
+    #         #     mlm_member = request.user.mlm_profile
+    #         #     mlm_member.total_bp += total_bp_points
+    #         #     mlm_member.current_month_purchase += final_total
+    #         #     mlm_member.save()
+                
+    #         #     # Check for position upgrade
+    #         #     # mlm_member.check_position_upgrade()
+    #         #     self.check_position_upgrade(mlm_member)
+
+    #         # Create Razorpay order
+    #         client = razorpay.Client(
+    #             auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET)
+    #         )
+
+    #         payment_data = {
+    #             'amount': int(final_total * 100),  # Convert to paise
+    #             'currency': 'INR',
+    #             'receipt': order.order_number,
+    #             'payment_capture': 1,
+    #             'notes': {
+    #                 'order_id': order.id,
+    #                 'shipping_address': order.shipping_address,
+    #                 'is_mlm_member': str(request.user.role == 'MLM_MEMBER'),
+    #                 'discount_applied': str(discount_percentage) + '%' if discount_percentage > 0 else 'No'
+    #             }
+    #         }
+            
+    #         razorpay_order = client.order.create(payment_data)
+            
+    #         # Update order with razorpay order id
+    #         order.razorpay_order_id = razorpay_order['id']
+    #         order.save()
+
+    #         return Response({
+    #             'status': 'success',
+    #             'order_id': order.id,
+    #             'razorpay_order_id': razorpay_order['id'],
+    #             'amount': razorpay_order['amount'],
+    #             'currency': razorpay_order['currency'],
+    #             'order_summary': {
+    #                 'subtotal': float(subtotal),
+    #                 'discount': {
+    #                     'percentage': float(discount_percentage),
+    #                     'amount': float(total_discount)
+    #                 },
+    #                 'gst': float(total_gst),
+    #                 'shipping': float(shipping_cost),
+    #                 'total': float(final_total),
+    #                 'bp_points': total_bp_points
+    #             }
+    #         })
+
+    #     except ValueError as e:
+    #         return Response({
+    #             'status': 'error',
+    #             'message': str(e)
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+    #     except Exception as e:
+    #         logger.error(f"Order processing error: {str(e)}")
+    #         return Response({
+    #             'status': 'error',
+    #             'message': 'An unexpected error occurred'
+    #         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class PaymentWebhookView(APIView):
