@@ -7350,95 +7350,101 @@ class MLMMemberReportsView(APIView):
             'data': report_data
         })
 
-    def generate_network_growth_report(self, mlm_member, start_date, end_date, period='monthly'):
+    def generate_network_growth_report(self, request, start_date=None, end_date=None, period='monthly'):
         """
-        Generate network growth report
+        Generate network growth report with detailed membership and sales data
         """
-        # Determine period grouping function
+        # Convert start_date and end_date from string to date if they're provided
+        if isinstance(start_date, str):
+            try:
+                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                start_date = None
+
+        if isinstance(end_date, str):
+            try:
+                end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                end_date = None
+
+        # Determine period-based grouping
         if period == 'daily':
             period_func = TruncDay('join_date')
         elif period == 'weekly':
             period_func = TruncWeek('join_date')
         elif period == 'yearly':
             period_func = TruncYear('join_date')
-        else:  # monthly
+        else:  # default to monthly
             period_func = TruncMonth('join_date')
 
-        # Recursive function to get all downline members
-        def get_all_downline(current_member):
-            downline = set()
+        # Base queryset with optional date filtering
+        if request.user.role == 'ADMIN':
+            # For admin, get all members
+            queryset = MLMMember.objects.all()
+        else:
+            # For MLM member, get their network
+            current_member = request.user.mlm_profile
             
-            def traverse(member):
+            # Recursive function to get entire downline
+            def get_network_members(member):
+                network = [member]
                 referrals = MLMMember.objects.filter(sponsor=member)
                 for referral in referrals:
-                    downline.add(referral)
-                    traverse(referral)
+                    network.extend(get_network_members(referral))
+                return network
             
-            traverse(current_member)
-            return downline
+            network_members = get_network_members(current_member)
+            queryset = MLMMember.objects.filter(id__in=[m.id for m in network_members])
 
-        # Get all downline members
-        downline_members = get_all_downline(mlm_member)
+        # Apply date filters if provided
+        if start_date:
+            queryset = queryset.filter(join_date__date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(join_date__date__lte=end_date)
 
-        # Calculate network growth
-        network_growth = []
-        
-        # Get all members in the date range
-        members_in_range = MLMMember.objects.filter(
-            sponsor=mlm_member,
-            join_date__date__gte=start_date,
-            join_date__date__lte=end_date
-        )
+        # Group and aggregate data
+        network_growth = queryset.annotate(
+            period=period_func
+        ).values(
+            'period'
+        ).annotate(
+            new_members=Count('id'),
+            total_network_size=Count('id'),  # This might need adjustment for true network size
+            total_bp=Sum('total_bp'),
+            total_sales=Sum(
+                'user__orders__final_amount', 
+                filter=Q(
+                    user__orders__status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED'],
+                    user__orders__order_date__date__gte=start_date if start_date else timezone.now() - timezone.timedelta(days=180),
+                    user__orders__order_date__date__lte=end_date if end_date else timezone.now()
+                )
+            ) or Decimal('0.00')
+        ).order_by('period')
 
-        # Group members by period
-        members_by_period = {}
-        for member in members_in_range:
-            # Determine the period based on join date
+        # Format period based on period type
+        formatted_growth = []
+        for entry in network_growth:
             if period == 'daily':
-                period_key = member.join_date.date()
+                period_str = entry['period'].strftime('%Y-%m-%d')
             elif period == 'weekly':
-                period_key = member.join_date.date().replace(day=1)
+                period_str = f"Week {entry['period'].strftime('%U')}, {entry['period'].year}"
             elif period == 'yearly':
-                period_key = member.join_date.year
+                period_str = str(entry['period'].year)
             else:  # monthly
-                period_key = member.join_date.replace(day=1).date()
+                period_str = entry['period'].strftime('%B %Y')
             
-            if period_key not in members_by_period:
-                members_by_period[period_key] = []
-            members_by_period[period_key].append(member)
-
-        # Process each period
-        for period_key, period_members in sorted(members_by_period.items()):
-            # Calculate total sales for new members in this period
-            period_sales = Order.objects.filter(
-                user__in=[m.user for m in period_members],
-                order_date__date__gte=start_date,
-                order_date__date__lte=end_date,
-                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
-            ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
-
-            # Calculate total BP for these members
-            total_bp = sum(member.total_bp for member in period_members)
-
-            # Format period key as string
-            if period == 'daily':
-                period_str = period_key.strftime('%Y-%m-%d')
-            elif period == 'weekly':
-                period_str = f"Week {period_key.strftime('%U')}, {period_key.year}"
-            elif period == 'yearly':
-                period_str = str(period_key)
-            else:  # monthly
-                period_str = period_key.strftime('%B %Y')
-
-            network_growth.append({
+            formatted_growth.append({
                 'period': period_str,
-                'new_members': len(period_members),
-                'total_network_size': len(downline_members),
-                'total_bp': total_bp,
-                'total_sales': float(period_sales)
+                'new_members': entry['new_members'],
+                'total_network_size': entry['total_network_size'],
+                'total_bp': entry['total_bp'],
+                'total_sales': float(entry['total_sales'])
             })
 
-        return network_growth
+        return Response({
+            'report_type': 'network_growth',
+            'data': formatted_growth
+        })
 
 class LiveCommissionDashboardView(APIView):
     """
