@@ -7424,22 +7424,28 @@ class MLMMemberReportsView(APIView):
         # Format period based on period type
         formatted_growth = []
         for entry in network_growth:
-            if period == 'daily':
-                period_str = entry['period'].strftime('%Y-%m-%d')
-            elif period == 'weekly':
-                period_str = f"Week {entry['period'].strftime('%U')}, {entry['period'].year}"
-            elif period == 'yearly':
-                period_str = str(entry['period'].year)
-            else:  # monthly
-                period_str = entry['period'].strftime('%B %Y')
-            
-            formatted_growth.append({
-                'period': period_str,
-                'new_members': entry['new_members'],
-                'total_network_size': entry['total_network_size'],
-                'total_bp': entry['total_bp'],
-                'total_sales': float(entry['total_sales'])
-            })
+            try:
+                if period == 'daily':
+                    period_str = entry['period'].strftime('%Y-%m-%d')
+                elif period == 'weekly':
+                    period_str = f"Week {entry['period'].strftime('%U')}, {entry['period'].year}"
+                elif period == 'yearly':
+                    period_str = str(entry['period'].year)
+                else:  # monthly
+                    period_str = entry['period'].strftime('%B %Y')
+                
+                # Safely handle potential None values
+                formatted_growth.append({
+                    'period': period_str,
+                    'new_members': entry.get('new_members', 0),
+                    'total_network_size': entry.get('total_network_size', 0),
+                    'total_bp': entry.get('total_bp', 0),
+                    'total_sales': float(entry.get('total_sales', 0) or 0)
+                })
+            except Exception as e:
+                # Log the problematic entry for debugging
+                logger.error(f"Error processing network growth entry: {entry}. Error: {str(e)}")
+                continue
 
         return Response({
             'report_type': 'network_growth',
