@@ -101,6 +101,51 @@ def update_bp_points_on_order(order):
     #     logger.error(f"Error updating BP points on order {order.id}: {str(e)}")
     #     return False
 
+def process_bp_monthly_update():
+    """
+    Process monthly BP updates
+    This should run on the 1st of each month
+    
+    BP points from downline members are added to their sponsors
+    """
+    try:
+        logger.info("Starting monthly BP update")
+        
+        # Get current date
+        now = timezone.now()
+        
+        # Only run on 1st of the month
+        if now.day != 1:
+            logger.info(f"Skipping BP update: not 1st of month (date: {now})")
+            return False
+            
+        # Get all active MLM members
+        mlm_members = MLMMember.objects.filter(is_active=True)
+        
+        # Process downline BP for each member
+        for sponsor in mlm_members:
+            # Get direct downline members
+            downline_members = MLMMember.objects.filter(sponsor=sponsor)
+            
+            for downline in downline_members:
+                # Get downline BP
+                downline_bp = downline.total_bp
+                
+                if downline_bp > 0:
+                    # Add downline BP to sponsor
+                    sponsor.add_bp(downline_bp)
+                    logger.info(f"Added {downline_bp} BP from {downline.member_id} to {sponsor.member_id}")
+            
+            # Check for position upgrade
+            sponsor.check_position_upgrade()
+            
+        logger.info("Monthly BP update complete")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error in monthly BP update: {str(e)}")
+        return False
+    
 def reverse_bp_points_on_order_cancellation(order):
     """
     Reverse BP points and purchase amount when an order is cancelled
@@ -403,7 +448,198 @@ def reverse_bp_points_on_order_cancellation(order):
 #         logger.error(f"Error in monthly commission calculation: {str(e)}")
 #         return False
 
-def calculate_monthly_commissions():
+# def calculate_monthly_commissions():
+#     """
+#     Calculate monthly commissions for all MLM members based on the differential model.
+#     This function should be scheduled to run on the 1st of each month.
+    
+#     The process:
+#     1. For each active MLM member, check if they maintained their monthly quota
+#     2. Calculate commissions from their downline based on position percentage differences
+#     3. Sum up BP points from downline members and add to the member's total
+#     4. Check for position upgrades based on new BP totals
+#     """
+#     try:
+#         today = timezone.now()
+        
+#         # Only run on the 1st day of the month
+#         if today.day != 1:
+#             logger.info(f"Skipping monthly commission calculation - today is day {today.day}, not 1st of month")
+#             return False
+            
+#         logger.info("Starting monthly commission calculation")
+        
+#         # Get the previous month's date range
+#         first_day_current_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+#         last_month = (first_day_current_month - timedelta(days=1))
+#         first_day_last_month = last_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+#         logger.info(f"Calculating commissions for period: {first_day_last_month.date()} to {last_month.date()}")
+        
+#         # Get all active MLM members
+#         active_members = MLMMember.objects.filter(is_active=True).select_related('position', 'sponsor')
+#         logger.info(f"Found {active_members.count()} active members")
+        
+#         # Track processed members and their commissions
+#         processed_count = 0
+#         commissions_created = 0
+#         bp_updates = 0
+#         position_upgrades = 0
+        
+#         # Use transaction to ensure all changes are atomic
+#         with transaction.atomic():
+#             # Process each member from highest position to lowest
+#             # This ensures parent members receive BP from downline correctly
+#             for member in active_members.order_by('-position__level_order'):
+#                 try:
+#                     # Skip members whose positions can't earn commissions
+#                     if not member.position.can_earn_commission:
+#                         logger.info(f"Member {member.member_id} position doesn't allow earning commissions, skipping")
+#                         continue
+                    
+#                     # Check if the member has maintained their monthly quota
+#                     monthly_purchases = get_member_monthly_purchases(member, first_day_last_month, last_month)
+#                     quota_maintained = monthly_purchases >= member.position.monthly_quota
+                    
+#                     if not quota_maintained:
+#                         logger.info(f"Member {member.member_id} did not maintain monthly quota ({monthly_purchases} < {member.position.monthly_quota}), skipping commission")
+                        
+#                         # Send notification about failing to meet quota
+#                         Notification.objects.create(
+#                             title="Monthly Quota Not Met",
+#                             message=f"You didn't meet your monthly quota of ₹{member.position.monthly_quota} for last month. You won't earn commissions from your downline this month.",
+#                             notification_type="INDIVIDUAL",
+#                             recipient=member
+#                         )
+#                         continue
+                        
+#                     # Member maintained quota, process their commissions
+#                     logger.info(f"Processing member {member.member_id} (position: {member.position.name})")
+                    
+#                     # Track total BP to add from downline
+#                     total_bp_from_downline = 0
+#                     total_commission = Decimal('0.00')
+                    
+#                     # Process downline members for commissions and BP
+#                     downline_members = MLMMember.objects.filter(
+#                         sponsor=member, 
+#                         is_active=True
+#                     ).select_related('position', 'user')
+                    
+#                     for downline in downline_members:
+#                         # Calculate position difference percentage
+#                         member_percentage = member.position.discount_percentage
+#                         downline_percentage = downline.position.discount_percentage
+                        
+#                         # Add BP from downline to member's total
+#                         total_bp_from_downline += downline.total_bp
+                        
+#                         # Skip if downline's position percentage is equal or higher
+#                         if downline_percentage >= member_percentage:
+#                             logger.info(f"Downline {downline.member_id} has equal or higher position percentage ({downline_percentage}% >= {member_percentage}%), skipping commission")
+#                             continue
+                        
+#                         # Calculate percentage difference for commission calculation
+#                         difference_percentage = member_percentage - downline_percentage
+                        
+#                         # Get downline's purchases for last month
+#                         downline_purchases = get_member_monthly_purchases(downline, first_day_last_month, last_month)
+                        
+#                         if downline_purchases <= 0:
+#                             logger.info(f"Downline {downline.member_id} had no purchases last month, skipping commission")
+#                             continue
+                        
+#                         # Calculate commission based on position percentage difference
+#                         commission_amount = (downline_purchases * Decimal(str(difference_percentage))) / Decimal('100.0')
+                        
+#                         if commission_amount > 0:
+#                             # Create commission record
+#                             Commission.objects.create(
+#                                 member=member,
+#                                 from_member=downline,
+#                                 amount=commission_amount,
+#                                 is_paid=True,  # Commissions are paid immediately on calculation
+#                                 payment_date=today,
+#                                 level=1,  # Direct downline level
+#                                 date=today,
+#                                 commission_type='MONTHLY',
+#                                 details={
+#                                     'month': first_day_last_month.strftime('%Y-%m'),
+#                                     'downline_purchases': float(downline_purchases),
+#                                     'member_percentage': float(member_percentage),
+#                                     'downline_percentage': float(downline_percentage),
+#                                     'difference_percentage': float(difference_percentage)
+#                                 }
+#                             )
+                            
+#                             commissions_created += 1
+#                             total_commission += commission_amount
+                            
+#                             logger.info(f"Created commission of {commission_amount} for {member.member_id} from {downline.member_id} (difference: {difference_percentage}%)")
+                    
+#                     # Update member's total BP with downline BP
+#                     if total_bp_from_downline > 0:
+#                         logger.info(f"Adding {total_bp_from_downline} BP from downline to member {member.member_id}")
+                        
+#                         old_bp = member.total_bp
+#                         member.total_bp += total_bp_from_downline
+                        
+#                         # Update member's total earnings
+#                         if total_commission > 0:
+#                             member.total_earnings += total_commission
+                        
+#                         # Save the changes
+#                         member.save(update_fields=['total_bp', 'total_earnings'])
+#                         bp_updates += 1
+                        
+#                         logger.info(f"Updated BP for {member.member_id}: {old_bp} → {member.total_bp}")
+                        
+#                         # Check if member qualifies for position upgrade
+#                         old_position = member.position
+#                         upgrade_position(member)
+                        
+#                         if member.position.id != old_position.id:
+#                             position_upgrades += 1
+#                             logger.info(f"Upgraded member {member.member_id} from {old_position.name} to {member.position.name}")
+                            
+#                             # Create notification for position upgrade
+#                             Notification.objects.create(
+#                                 title="Position Upgraded!",
+#                                 message=f"Congratulations! You've been upgraded from {old_position.name} (at {old_position.discount_percentage}%) to {member.position.name} (at {member.position.discount_percentage}%).",
+#                                 notification_type="INDIVIDUAL",
+#                                 recipient=member
+#                             )
+                    
+#                     # Create notification about earned commission
+#                     if total_commission > 0:
+#                         Notification.objects.create(
+#                             title="Monthly Commission Processed",
+#                             message=f"You've earned ₹{total_commission} in commissions from your downline for last month.",
+#                             notification_type="INDIVIDUAL",
+#                             recipient=member
+#                         )
+                        
+#                     processed_count += 1
+                    
+#                 except Exception as e:
+#                     logger.error(f"Error processing member {member.member_id}: {str(e)}", exc_info=True)
+#                     # Continue with next member
+#                     continue
+            
+#             # Reset current_month_purchase for all members
+#             MLMMember.objects.all().update(current_month_purchase=0)
+#             logger.info("Reset current_month_purchase for all members to 0")
+            
+#         # Log summary
+#         logger.info(f"Monthly commission calculation completed: {processed_count} members processed, {commissions_created} commissions created, {bp_updates} BP updates, {position_upgrades} position upgrades")
+        
+#         return True
+        
+#     except Exception as e:
+#         logger.error(f"Error in monthly commission calculation: {str(e)}", exc_info=True)
+#         return False
+
+def calculate_monthly_commissions(force_calculate=False):
     """
     Calculate monthly commissions for all MLM members based on the differential model.
     This function should be scheduled to run on the 1st of each month.
@@ -413,12 +649,18 @@ def calculate_monthly_commissions():
     2. Calculate commissions from their downline based on position percentage differences
     3. Sum up BP points from downline members and add to the member's total
     4. Check for position upgrades based on new BP totals
+    
+    Args:
+        force_calculate (bool): If True, will run regardless of the day of month
+        
+    Returns:
+        bool: True if calculation was successful, False otherwise
     """
     try:
         today = timezone.now()
         
-        # Only run on the 1st day of the month
-        if today.day != 1:
+        # Only run on the 1st day of the month unless forced
+        if today.day != 1 and not force_calculate:
             logger.info(f"Skipping monthly commission calculation - today is day {today.day}, not 1st of month")
             return False
             
@@ -432,7 +674,7 @@ def calculate_monthly_commissions():
         logger.info(f"Calculating commissions for period: {first_day_last_month.date()} to {last_month.date()}")
         
         # Get all active MLM members
-        active_members = MLMMember.objects.filter(is_active=True).select_related('position', 'sponsor')
+        active_members = MLMMember.objects.filter(is_active=True).select_related('position', 'sponsor', 'user')
         logger.info(f"Found {active_members.count()} active members")
         
         # Track processed members and their commissions
@@ -453,11 +695,10 @@ def calculate_monthly_commissions():
                         continue
                     
                     # Check if the member has maintained their monthly quota
-                    monthly_purchases = get_member_monthly_purchases(member, first_day_last_month, last_month)
-                    quota_maintained = monthly_purchases >= member.position.monthly_quota
+                    quota_maintained = member.check_monthly_quota_maintenance(last_month)
                     
                     if not quota_maintained:
-                        logger.info(f"Member {member.member_id} did not maintain monthly quota ({monthly_purchases} < {member.position.monthly_quota}), skipping commission")
+                        logger.info(f"Member {member.member_id} did not maintain monthly quota, skipping commission")
                         
                         # Send notification about failing to meet quota
                         Notification.objects.create(
@@ -474,6 +715,7 @@ def calculate_monthly_commissions():
                     # Track total BP to add from downline
                     total_bp_from_downline = 0
                     total_commission = Decimal('0.00')
+                    downline_details = []
                     
                     # Process downline members for commissions and BP
                     downline_members = MLMMember.objects.filter(
@@ -498,7 +740,7 @@ def calculate_monthly_commissions():
                         difference_percentage = member_percentage - downline_percentage
                         
                         # Get downline's purchases for last month
-                        downline_purchases = get_member_monthly_purchases(downline, first_day_last_month, last_month)
+                        downline_purchases = get_monthly_purchases(downline, first_day_last_month, last_month)
                         
                         if downline_purchases <= 0:
                             logger.info(f"Downline {downline.member_id} had no purchases last month, skipping commission")
@@ -518,6 +760,7 @@ def calculate_monthly_commissions():
                                 level=1,  # Direct downline level
                                 date=today,
                                 commission_type='MONTHLY',
+                                calculation_month=first_day_last_month.date(),
                                 details={
                                     'month': first_day_last_month.strftime('%Y-%m'),
                                     'downline_purchases': float(downline_purchases),
@@ -529,6 +772,14 @@ def calculate_monthly_commissions():
                             
                             commissions_created += 1
                             total_commission += commission_amount
+                            
+                            # Store downline details for notification
+                            downline_details.append({
+                                'name': downline.user.get_full_name() or downline.member_id,
+                                'purchases': float(downline_purchases),
+                                'commission': float(commission_amount),
+                                'difference': float(difference_percentage)
+                            })
                             
                             logger.info(f"Created commission of {commission_amount} for {member.member_id} from {downline.member_id} (difference: {difference_percentage}%)")
                     
@@ -551,7 +802,7 @@ def calculate_monthly_commissions():
                         
                         # Check if member qualifies for position upgrade
                         old_position = member.position
-                        upgrade_position(member)
+                        member.check_position_upgrade()
                         
                         if member.position.id != old_position.id:
                             position_upgrades += 1
@@ -567,9 +818,17 @@ def calculate_monthly_commissions():
                     
                     # Create notification about earned commission
                     if total_commission > 0:
+                        # Create detailed message with breakdown by downline
+                        message = f"You've earned ₹{total_commission} in commissions from your downline for last month.\n\n"
+                        
+                        if downline_details:
+                            message += "Commission breakdown:\n"
+                            for detail in downline_details:
+                                message += f"- {detail['name']}: ₹{detail['commission']} ({detail['difference']}% of ₹{detail['purchases']})\n"
+                        
                         Notification.objects.create(
                             title="Monthly Commission Processed",
-                            message=f"You've earned ₹{total_commission} in commissions from your downline for last month.",
+                            message=message,
                             notification_type="INDIVIDUAL",
                             recipient=member
                         )
@@ -585,6 +844,13 @@ def calculate_monthly_commissions():
             MLMMember.objects.all().update(current_month_purchase=0)
             logger.info("Reset current_month_purchase for all members to 0")
             
+            # Create system notification about completed calculation
+            Notification.objects.create(
+                title="Monthly Commission Calculation Complete",
+                message=f"Monthly commission calculation completed: {processed_count} members processed, {commissions_created} commissions created, {bp_updates} BP updates, {position_upgrades} position upgrades",
+                notification_type="SYSTEM"
+            )
+            
         # Log summary
         logger.info(f"Monthly commission calculation completed: {processed_count} members processed, {commissions_created} commissions created, {bp_updates} BP updates, {position_upgrades} position upgrades")
         
@@ -593,6 +859,27 @@ def calculate_monthly_commissions():
     except Exception as e:
         logger.error(f"Error in monthly commission calculation: {str(e)}", exc_info=True)
         return False
+
+def get_monthly_purchases(member, start_date, end_date):
+    """
+    Get total purchase amount for a member within a date range
+    
+    Args:
+        member (MLMMember): The member to get purchases for
+        start_date (datetime): Start date (inclusive)
+        end_date (datetime): End date (inclusive)
+        
+    Returns:
+        Decimal: Total purchase amount
+    """
+    return Order.objects.filter(
+        user=member.user,
+        order_date__gte=start_date,
+        order_date__lte=end_date,
+        status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+    ).aggregate(
+        total=Sum('final_amount')
+    )['total'] or Decimal('0.00')
 
 def get_member_monthly_purchases(member, start_date, end_date):
     """Get total purchases for a member in the given date range"""
@@ -1435,15 +1722,7 @@ def check_monthly_quota_maintenance(member):
 
 def process_first_payment(order):
     """
-    Process first payment for a new MLM member.
-    Checks if the payment meets the monthly quota requirement and
-    awards a 1000 rupee bonus to the sponsor if requirements are met.
-    
-    Args:
-        order (Order): The completed order
-    
-    Returns:
-        bool: Whether first payment was processed successfully
+    Process first payment bonus when a new MLM member makes their first qualifying purchase
     """
     try:
         # Get the member who made the order
@@ -1451,68 +1730,94 @@ def process_first_payment(order):
         
         # Check if user is an MLM member
         if not hasattr(user, 'mlm_profile'):
-            logger.info(f"User {user.id} is not an MLM member, skipping first payment processing")
+            logger.info(f"User {user.id} is not an MLM member, skipping first payment bonus")
             return False
             
         member = user.mlm_profile
         
-        # Check if first payment is already processed
-        if member.first_payment_complete:
-            logger.info(f"First payment already processed for member {member.member_id}, skipping")
+        # Very important: Use a database transaction to prevent race conditions
+        with transaction.atomic():
+            # Check if first payment is already processed on the member
+            if member.first_payment_complete:
+                logger.info(f"First payment already processed for member {member.member_id}, skipping bonus")
+                return False
+                
+            # Check if a bonus commission already exists for this member (regardless of order)
+            existing_bonus = Commission.objects.filter(
+                from_member=member,
+                is_first_purchase_bonus=True
+            ).exists()
+            
+            if existing_bonus:
+                logger.info(f"First purchase bonus already exists for member {member.member_id}, skipping")
+                # Make sure the member's first_payment_complete flag is updated
+                if not member.first_payment_complete:
+                    member.first_payment_complete = True
+                    member.first_payment_amount = order.final_amount
+                    member.save(update_fields=['first_payment_complete', 'first_payment_amount'])
+                return True
+            
+            # Get the monthly quota requirement from position
+            monthly_quota = member.position.monthly_quota
+            
+            # Check if order amount meets the requirement
+            if order.final_amount >= monthly_quota:
+                # Mark first payment as complete
+                member.first_payment_complete = True
+                member.first_payment_amount = order.final_amount
+                member.save(update_fields=['first_payment_complete', 'first_payment_amount'])
+                
+                logger.info(f"First payment completed for member {member.member_id}: {order.final_amount} >= {monthly_quota}")
+                
+                # Check if member has a sponsor to award bonus
+                if member.sponsor:
+                    # Create a bonus commission of 1000 rupees for the sponsor
+                    logger.info(f"Creating ₹1000 bonus for sponsor {member.sponsor.member_id}")
+                    
+                    commission = Commission.objects.create(
+                        member=member.sponsor,
+                        from_member=member,
+                        order=order,
+                        amount=Decimal('1000.00'),  # 1000 rupees bonus
+                        level=1,  # Direct sponsor
+                        is_paid=True,  # Mark as paid immediately
+                        payment_date=timezone.now(),
+                        date=timezone.now(),
+                        commission_type='BONUS',
+                        is_first_purchase_bonus=True,
+                        details={
+                            'bonus_type': 'first_payment',
+                            'payment_amount': float(order.final_amount),
+                            'quota_requirement': float(monthly_quota)
+                        }
+                    )
+                    
+                    # Update sponsor's total earnings
+                    member.sponsor.total_earnings += Decimal('1000.00')
+                    member.sponsor.save(update_fields=['total_earnings'])
+                    
+                    # Create notification for sponsor
+                    Notification.objects.create(
+                        title='First Purchase Bonus',
+                        message=f'You have received a bonus of ₹1000 for {member.user.get_full_name()}\'s first qualifying purchase.',
+                        notification_type='COMMISSION',
+                        recipient=member.sponsor
+                    )
+                    
+                    # Create notification for member
+                    Notification.objects.create(
+                        title='First Purchase Complete',
+                        message=f'Congratulations! You have completed your first qualifying purchase. Your account is now fully active.',
+                        notification_type='INDIVIDUAL',
+                        recipient=member
+                    )
+                    
+                return True
+            else:
+                logger.info(f"Payment amount {order.final_amount} does not meet quota {monthly_quota} for first payment")
+                
             return False
             
-        # Get the monthly quota requirement from position
-        monthly_quota = member.position.monthly_quota
-        
-        # Check if order amount meets the requirement
-        if order.final_amount >= monthly_quota:
-            # Mark first payment as complete
-            member.first_payment_complete = True
-            member.first_payment_amount = order.final_amount
-            member.save(update_fields=['first_payment_complete', 'first_payment_amount'])
-            
-            logger.info(f"First payment completed for member {member.member_id}: {order.final_amount} ≥ {monthly_quota}")
-            
-            # Check if member has a sponsor to award bonus
-            if member.sponsor:
-                # Create a bonus commission of 1000 rupees for the sponsor
-                
-                logger.info(f"Creating 1000 rupee bonus for sponsor {member.sponsor.member_id}")
-                
-                Commission.objects.create(
-                    member=member.sponsor,
-                    from_member=member,
-                    order=order,
-                    amount=Decimal('1000.00'),  # 1000 rupees bonus
-                    level=1,  # Direct sponsor
-                    is_paid=True,  # Mark as paid immediately
-                    payment_date=timezone.now(),
-                    commission_type='BONUS',
-                    details={
-                        'bonus_type': 'first_payment',
-                        'payment_amount': float(order.final_amount),
-                        'quota_requirement': float(monthly_quota)
-                    }
-                )
-                
-                # Update sponsor's total earnings
-                member.sponsor.total_earnings += Decimal('1000.00')
-                member.sponsor.save(update_fields=['total_earnings'])
-                
-                # Create notification for sponsor
-                Notification.objects.create(
-                    title='First Payment Bonus',
-                    message=f'You have received a bonus of ₹1000 for {member.user.get_full_name()}\'s first payment.',
-                    notification_type='COMMISSION',
-                    recipient=member.sponsor
-                )
-                
-            return True
-        else:
-            logger.info(f"Payment amount {order.final_amount} does not meet quota {monthly_quota} for first payment")
-            
-        return False
-        
     except Exception as e:
         logger.error(f"Error processing first payment bonus: {str(e)}")
         return False

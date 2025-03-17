@@ -934,16 +934,12 @@ class Commission(models.Model):
         ).order_by('month')
         
         return monthly_data
+    
+    # @classmethod
     @classmethod
     def calculate_commissions(cls, order):
         """
-        Calculate commissions for an order, considering first purchase and monthly quota
-        
-        Args:
-            order (Order): The order to calculate commissions for
-        
-        Returns:
-            list: Commission objects to be created
+        Calculate commissions for an order based on pure differential model
         """
         try:
             # Get the member who made the purchase
@@ -971,53 +967,68 @@ class Commission(models.Model):
                         level += 1
                         continue
                     
-                    # Calculate commission rate for this level
-                    # You might want to adjust this logic based on your specific requirements
-                    level_rates = {
-                        1: 1.0,    # 100% of base rate
-                        2: 0.5,    # 50% of base rate
-                        3: 0.25,   # 25% of base rate
-                        4: 0.125,  # 12.5% of base rate
-                        5: 0.0625  # 6.25% of base rate
-                    }
+                    # Get position percentages
+                    sponsor_percentage = current_sponsor.position.discount_percentage
+                    member_percentage = member.position.discount_percentage
                     
-                    # Get base commission rate from position
-                    base_rate = current_sponsor.position.commission_percentage
+                    # Only calculate commission if sponsor has higher percentage
+                    if sponsor_percentage <= member_percentage:
+                        # No commission if sponsor's percentage is not higher
+                        current_sponsor = current_sponsor.sponsor
+                        level += 1
+                        continue
                     
-                    # Apply level-based reduction
-                    commission_rate = base_rate * level_rates.get(level, 0.03125)
+                    # Calculate differential percentage
+                    differential_percentage = sponsor_percentage - member_percentage
                     
-                    # Calculate commission amount
+                    # Calculate commission amount based on differential percentage
                     commission_amount = (
                         order.final_amount * 
-                        Decimal(str(commission_rate)) / 
+                        Decimal(str(differential_percentage)) / 
                         Decimal('100')
                     )
                     
-                    # Special handling for first purchase bonus
-                    is_first_purchase_bonus = False
-                    if (not member.first_purchase_bonus_received and 
-                        level == 1):  # Only for direct sponsor
-                        # Add first purchase bonus (e.g., 1000 rupees)
-                        first_bonus = Decimal('1000.00')
-                        commission_amount += first_bonus
-                        is_first_purchase_bonus = True
-                        
-                        # Mark first purchase bonus as received
-                        member.first_purchase_bonus_received = True
-                        member.save()
+                    # Create regular commission record
+                    if commission_amount > 0:
+                        regular_commission = cls(
+                            member=current_sponsor,
+                            from_member=member,
+                            order=order,
+                            amount=commission_amount,
+                            level=level,
+                            is_paid=True,
+                            is_first_purchase_bonus=False,
+                            commission_type='ORDER'
+                        )
+                        commissions.append(regular_commission)
                     
-                    # Create commission
-                    commission_obj = cls(
-                        member=current_sponsor,
-                        from_member=member,
-                        order=order,
-                        amount=commission_amount,
-                        level=level,
-                        is_paid=True,
-                        is_first_purchase_bonus=is_first_purchase_bonus
-                    )
-                    commissions.append(commission_obj)
+                    # Handle first purchase bonus (only for direct sponsor)
+                    # IMPORTANT: We'll skip this if there's already a first purchase bonus
+                    if not member.first_purchase_bonus_received and level == 1:
+                        # Check if a bonus already exists
+                        existing_bonus = cls.objects.filter(
+                            from_member=member,
+                            is_first_purchase_bonus=True
+                        ).exists()
+                        
+                        if not existing_bonus:
+                            # Create separate bonus commission
+                            first_bonus = Decimal('1000.00')  # First purchase bonus amount
+                            bonus_commission = cls(
+                                member=current_sponsor,
+                                from_member=member,
+                                order=order,
+                                amount=first_bonus,
+                                level=level,
+                                is_paid=True,
+                                is_first_purchase_bonus=True,
+                                commission_type='BONUS'
+                            )
+                            commissions.append(bonus_commission)
+                            
+                            # Mark first purchase bonus as received
+                            member.first_purchase_bonus_received = True
+                            member.save()
                     
                     # Move to next sponsor
                     current_sponsor = current_sponsor.sponsor
@@ -1032,6 +1043,211 @@ class Commission(models.Model):
         except Exception as e:
             logger.error(f"Error calculating commissions: {str(e)}")
             return []
+    # def calculate_commissions(cls, order):
+    #     """
+    #     Calculate commissions for an order based on pure differential model
+    #     Commission is based on the difference between position percentages
+        
+    #     Args:
+    #         order (Order): The order to calculate commissions for
+        
+    #     Returns:
+    #         list: Commission objects to be created
+    #     """
+    #     try:
+    #         # Get the member who made the purchase
+    #         member = order.user.mlm_profile
+            
+    #         # List to store calculated commissions
+    #         commissions = []
+            
+    #         # Track current sponsor
+    #         current_sponsor = member.sponsor
+            
+    #         # Traverse up the network
+    #         level = 1
+    #         while current_sponsor and level <= 5:  # Limit to 5 levels
+    #             try:
+    #                 # Check if sponsor can earn commission
+    #                 if not current_sponsor.position.can_earn_commission:
+    #                     current_sponsor = current_sponsor.sponsor
+    #                     level += 1
+    #                     continue
+                    
+    #                 # Check monthly quota maintenance
+    #                 if not current_sponsor.check_monthly_quota_maintenance():
+    #                     current_sponsor = current_sponsor.sponsor
+    #                     level += 1
+    #                     continue
+                    
+    #                 # Get position percentages
+    #                 sponsor_percentage = current_sponsor.position.discount_percentage
+    #                 member_percentage = member.position.discount_percentage
+                    
+    #                 # Only calculate commission if sponsor has higher percentage
+    #                 if sponsor_percentage <= member_percentage:
+    #                     # No commission if sponsor's percentage is not higher
+    #                     current_sponsor = current_sponsor.sponsor
+    #                     level += 1
+    #                     continue
+                    
+    #                 # Calculate differential percentage
+    #                 differential_percentage = sponsor_percentage - member_percentage
+                    
+    #                 # Calculate commission amount based on differential percentage
+    #                 commission_amount = (
+    #                     order.final_amount * 
+    #                     Decimal(str(differential_percentage)) / 
+    #                     Decimal('100')
+    #                 )
+                    
+    #                 # First purchase bonus should be a separate commission record
+    #                 is_first_purchase_bonus = False
+                    
+    #                 # Create regular commission
+    #                 regular_commission = cls(
+    #                     member=current_sponsor,
+    #                     from_member=member,
+    #                     order=order,
+    #                     amount=commission_amount,
+    #                     level=level,
+    #                     is_paid=True,
+    #                     is_first_purchase_bonus=False,
+    #                     commission_type='ORDER'
+    #                 )
+    #                 commissions.append(regular_commission)
+                    
+    #                 # Handle first purchase bonus (only for direct sponsor)
+    #                 if (not member.first_purchase_bonus_received and level == 1):
+    #                     # Create separate bonus commission
+    #                     first_bonus = Decimal('1000.00')  # First purchase bonus amount
+    #                     bonus_commission = cls(
+    #                         member=current_sponsor,
+    #                         from_member=member,
+    #                         order=order,
+    #                         amount=first_bonus,
+    #                         level=level,
+    #                         is_paid=True,
+    #                         is_first_purchase_bonus=True,
+    #                         commission_type='BONUS'
+    #                     )
+    #                     commissions.append(bonus_commission)
+                        
+    #                     # Mark first purchase bonus as received
+    #                     member.first_purchase_bonus_received = True
+    #                     member.save()
+                    
+    #                 # Move to next sponsor
+    #                 current_sponsor = current_sponsor.sponsor
+    #                 level += 1
+                
+    #             except Exception as sponsor_error:
+    #                 logger.error(f"Error processing sponsor {current_sponsor.id}: {str(sponsor_error)}")
+    #                 break
+            
+    #         return commissions
+        
+    #     except Exception as e:
+    #         logger.error(f"Error calculating commissions: {str(e)}")
+    #         return []
+    # @classmethod
+    # def calculate_commissions(cls, order):
+    #     """
+    #     Calculate commissions for an order, considering first purchase and monthly quota
+        
+    #     Args:
+    #         order (Order): The order to calculate commissions for
+        
+    #     Returns:
+    #         list: Commission objects to be created
+    #     """
+    #     try:
+    #         # Get the member who made the purchase
+    #         member = order.user.mlm_profile
+            
+    #         # List to store calculated commissions
+    #         commissions = []
+            
+    #         # Track current sponsor
+    #         current_sponsor = member.sponsor
+            
+    #         # Traverse up the network
+    #         level = 1
+    #         while current_sponsor and level <= 5:  # Limit to 5 levels
+    #             try:
+    #                 # Check if sponsor can earn commission
+    #                 if not current_sponsor.position.can_earn_commission:
+    #                     current_sponsor = current_sponsor.sponsor
+    #                     level += 1
+    #                     continue
+                    
+    #                 # Check monthly quota maintenance
+    #                 if not current_sponsor.check_monthly_quota_maintenance():
+    #                     current_sponsor = current_sponsor.sponsor
+    #                     level += 1
+    #                     continue
+                    
+    #                 # Calculate commission rate for this level
+    #                 # You might want to adjust this logic based on your specific requirements
+    #                 level_rates = {
+    #                     1: 1.0,    # 100% of base rate
+    #                     2: 0.5,    # 50% of base rate
+    #                     3: 0.25,   # 25% of base rate
+    #                     4: 0.125,  # 12.5% of base rate
+    #                     5: 0.0625  # 6.25% of base rate
+    #                 }
+                    
+    #                 # Get base commission rate from position
+    #                 base_rate = current_sponsor.position.commission_percentage
+                    
+    #                 # Apply level-based reduction
+    #                 commission_rate = base_rate * level_rates.get(level, 0.03125)
+                    
+    #                 # Calculate commission amount
+    #                 commission_amount = (
+    #                     order.final_amount * 
+    #                     Decimal(str(commission_rate)) / 
+    #                     Decimal('100')
+    #                 )
+                    
+    #                 # Special handling for first purchase bonus
+    #                 is_first_purchase_bonus = False
+    #                 if (not member.first_purchase_bonus_received and 
+    #                     level == 1):  # Only for direct sponsor
+    #                     # Add first purchase bonus (e.g., 1000 rupees)
+    #                     first_bonus = Decimal('1000.00')
+    #                     commission_amount += first_bonus
+    #                     is_first_purchase_bonus = True
+                        
+    #                     # Mark first purchase bonus as received
+    #                     member.first_purchase_bonus_received = True
+    #                     member.save()
+                    
+    #                 # Create commission
+    #                 commission_obj = cls(
+    #                     member=current_sponsor,
+    #                     from_member=member,
+    #                     order=order,
+    #                     amount=commission_amount,
+    #                     level=level,
+    #                     is_paid=True,
+    #                     is_first_purchase_bonus=is_first_purchase_bonus
+    #                 )
+    #                 commissions.append(commission_obj)
+                    
+    #                 # Move to next sponsor
+    #                 current_sponsor = current_sponsor.sponsor
+    #                 level += 1
+                
+    #             except Exception as sponsor_error:
+    #                 logger.error(f"Error processing sponsor {current_sponsor.id}: {str(sponsor_error)}")
+    #                 break
+            
+    #         return commissions
+        
+    #     except Exception as e:
+    #         logger.error(f"Error calculating commissions: {str(e)}")
+    #         return []
         
     @receiver(post_save, sender=Order)
     def process_order_commissions(sender, instance, created, **kwargs):

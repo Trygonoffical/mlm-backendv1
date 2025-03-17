@@ -788,10 +788,33 @@ class MLMMemberViewSet(viewsets.ModelViewSet):
         ).order_by('-created_at')
 
         # Calculate total earnings
-        total_earnings = Commission.objects.filter(
+        # total_earnings = Commission.objects.filter(
+        #     member=member,
+        #     is_paid=True
+        # ).aggregate(total=Sum('amount'))['total'] or 0
+
+        total_earnings = (
+        # Get regular commissions
+        Commission.objects.filter(
             member=member,
-            is_paid=True
-        ).aggregate(total=Sum('amount'))['total'] or 0
+            is_paid=True,
+            is_first_purchase_bonus=False  # Regular commissions
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        )
+        
+        # Add first purchase bonuses (counting each member only once)
+        first_purchase_bonuses = (
+            Commission.objects.filter(
+                member=member,
+                is_paid=True,
+                is_first_purchase_bonus=True
+            )
+            .values('from_member')  # Group by downline member
+            .annotate(bonus=Sum('amount'))
+            .aggregate(total=Sum('bonus'))['total'] or Decimal('0.00')
+        )
+        
+        total_earnings += first_purchase_bonuses
 
         # Calculate pending payouts
         pending_payouts = Commission.objects.filter(
