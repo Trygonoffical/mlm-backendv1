@@ -1,7 +1,7 @@
 
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag , CommissionActivationRequest , PickupAddress, Shipment, ShipmentStatusUpdate , ShippingConfig , ShippingAddress
+from .models import Testimonial , HomeSlider , Category , ProductImage , ProductFeature , Product , Position , MLMMember , Commission , WalletTransaction , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem , Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , ProductFAQ  , MetaTag , CommissionActivationRequest , PickupAddress, Shipment, ShipmentStatusUpdate , ShippingConfig , ShippingAddress , StaffMember , StaffPermission , StaffRole
 from appAuth.serializers import UserSerializer
 from django.db import IntegrityError
 from django.db.models import Sum, Avg, Count, Min, Max
@@ -11,6 +11,7 @@ import re
 from django.utils.text import slugify
 from django.core.validators import RegexValidator
 import logging
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -1972,3 +1973,270 @@ class ShipmentSerializer(serializers.ModelSerializer):
             
         return data
 
+class StaffPermissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StaffPermission
+        fields = ['id', 'name', 'description', 'module', 'is_active']
+
+
+class StaffRoleSerializer(serializers.ModelSerializer):
+    permissions = StaffPermissionSerializer(many=True, read_only=True)
+    permission_ids = serializers.PrimaryKeyRelatedField(
+        queryset=StaffPermission.objects.all(), 
+        many=True, 
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = StaffRole
+        fields = ['id', 'name', 'description', 'permissions', 'permission_ids', 'is_active']
+
+    def create(self, validated_data):
+        permission_ids = validated_data.pop('permission_ids', [])
+        role = StaffRole.objects.create(**validated_data)
+        if permission_ids:
+            role.permissions.set(permission_ids)
+        return role
+
+    def update(self, instance, validated_data):
+        permission_ids = validated_data.pop('permission_ids', None)
+        
+        # Update role fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Update permissions if provided
+        if permission_ids is not None:
+            instance.permissions.set(permission_ids)
+            
+        return instance
+
+
+class StaffMemberCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating staff members with associated user"""
+    # User fields
+    username = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    email = serializers.EmailField(write_only=True)
+    first_name = serializers.CharField(write_only=True)
+    last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    
+    # Permission fields
+    role_id = serializers.PrimaryKeyRelatedField(
+        queryset=StaffRole.objects.all(),
+        source='role'
+    )
+    supervisor_id = serializers.PrimaryKeyRelatedField(
+        queryset=StaffMember.objects.all(),
+        source='supervisor',
+        required=False,
+        allow_null=True
+    )
+    custom_permission_ids = serializers.PrimaryKeyRelatedField(
+        queryset=StaffPermission.objects.all(),
+        many=True,
+        write_only=True,
+        required=False
+    )
+    
+    # Module permission checkboxes (write-only)
+    # Add fields for each permission module
+    user_management_permissions = serializers.MultipleChoiceField(
+        choices=[], 
+        required=False, 
+        write_only=True
+    )
+    order_management_permissions = serializers.MultipleChoiceField(
+        choices=[], 
+        required=False, 
+        write_only=True
+    )
+    product_management_permissions = serializers.MultipleChoiceField(
+        choices=[], 
+        required=False, 
+        write_only=True
+    )
+    kyc_management_permissions = serializers.MultipleChoiceField(
+        choices=[], 
+        required=False, 
+        write_only=True
+    )
+    report_management_permissions = serializers.MultipleChoiceField(
+        choices=[], 
+        required=False, 
+        write_only=True
+    )
+    wallet_management_permissions = serializers.MultipleChoiceField(
+        choices=[], 
+        required=False, 
+        write_only=True
+    )
+    settings_management_permissions = serializers.MultipleChoiceField(
+        choices=[], 
+        required=False, 
+        write_only=True
+    )
+
+    class Meta:
+        model = StaffMember
+        fields = [
+            'id', 'username', 'password', 'email', 'first_name', 'last_name',
+            'role_id', 'supervisor_id', 'department', 'phone_number', 'employee_id',
+            'is_active', 'custom_permission_ids',
+            'user_management_permissions', 'order_management_permissions',
+            'product_management_permissions', 'kyc_management_permissions',
+            'report_management_permissions', 'wallet_management_permissions',
+            'settings_management_permissions'
+        ]
+        read_only_fields = ['id']
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        # Dynamically load permission choices for each module
+        modules = ['user_management', 'order_management', 'product_management', 
+                 'kyc_management', 'report_management', 'wallet_management',
+                 'settings_management']
+                 
+        for module in modules:
+            field_name = f"{module}_permissions"
+            if field_name in self.fields:
+                permissions = StaffPermission.objects.filter(
+                    module=module, 
+                    is_active=True
+                )
+                self.fields[field_name].choices = [
+                    (perm.id, perm.name) for perm in permissions
+                ]
+
+    @transaction.atomic
+    def create(self, validated_data):
+        # Extract user data
+        user_data = {
+            'username': validated_data.pop('username'),
+            'password': validated_data.pop('password'),
+            'email': validated_data.pop('email'),
+            'first_name': validated_data.pop('first_name'),
+            'last_name': validated_data.pop('last_name', ''),
+            'role': 'ADMIN'  # Set role to ADMIN for staff
+        }
+        
+        # Extract permission data
+        custom_permission_ids = validated_data.pop('custom_permission_ids', [])
+        
+        # Extract module permissions
+        module_permission_ids = []
+        modules = ['user_management', 'order_management', 'product_management', 
+                 'kyc_management', 'report_management', 'wallet_management',
+                 'settings_management']
+                 
+        for module in modules:
+            field_name = f"{module}_permissions"
+            if field_name in validated_data:
+                module_permission_ids.extend(validated_data.pop(field_name, []))
+        
+        # Combine all permission IDs
+        all_permission_ids = set(custom_permission_ids + module_permission_ids)
+        
+        # Create user
+        user = User.objects.create_user(**user_data)
+        
+        # Create staff member
+        staff_member = StaffMember.objects.create(user=user, **validated_data)
+        
+        # Set custom permissions
+        if all_permission_ids:
+            staff_member.custom_permissions.set(all_permission_ids)
+            
+        return staff_member
+
+
+class StaffMemberListSerializer(serializers.ModelSerializer):
+    """Serializer for listing staff members"""
+    username = serializers.CharField(source='user.username')
+    email = serializers.EmailField(source='user.email')
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    full_name = serializers.SerializerMethodField()
+    role_name = serializers.CharField(source='role.name')
+    supervisor_name = serializers.SerializerMethodField()
+    permission_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StaffMember
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
+            'role_name', 'supervisor_name', 'department', 'employee_id',
+            'is_active', 'permission_count', 'created_at'
+        ]
+        
+    def get_full_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
+        
+    def get_supervisor_name(self, obj):
+        if obj.supervisor:
+            return obj.supervisor.user.get_full_name() or obj.supervisor.user.username
+        return None
+        
+    def get_permission_count(self, obj):
+        """Count total permissions (role + custom)"""
+        role_permissions = obj.role.permissions.count()
+        custom_permissions = obj.custom_permissions.count()
+        # We need to account for duplicates (permissions in both role and custom)
+        role_perm_ids = set(obj.role.permissions.values_list('id', flat=True))
+        custom_perm_ids = set(obj.custom_permissions.values_list('id', flat=True))
+        unique_perms = len(role_perm_ids.union(custom_perm_ids))
+        return unique_perms
+
+
+class StaffMemberDetailSerializer(serializers.ModelSerializer):
+    """Serializer for detailed staff member view"""
+    username = serializers.CharField(source='user.username')
+    email = serializers.EmailField(source='user.email')
+    first_name = serializers.CharField(source='user.first_name')
+    last_name = serializers.CharField(source='user.last_name')
+    role = StaffRoleSerializer(read_only=True)
+    supervisor = StaffMemberListSerializer(read_only=True)
+    permissions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StaffMember
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'role', 'supervisor', 'department', 'phone_number', 
+            'employee_id', 'is_active', 'permissions',
+            'created_at', 'updated_at'
+        ]
+        
+    def get_permissions(self, obj):
+        """Get all effective permissions grouped by module"""
+        # Get role permissions
+        role_permissions = obj.role.permissions.filter(is_active=True)
+        # Get custom permissions
+        custom_permissions = obj.custom_permissions.filter(is_active=True)
+        
+        # Combine and deduplicate
+        all_permissions = {}
+        
+        for perm in list(role_permissions) + list(custom_permissions):
+            if perm.module not in all_permissions:
+                all_permissions[perm.module] = []
+                
+            # Add permission if not already in the list
+            perm_data = {
+                'id': perm.id,
+                'name': perm.name,
+                'description': perm.description,
+                'source': 'role' if perm in role_permissions else 'custom'
+            }
+            
+            # Check if permission already exists in results
+            existing = next((p for p in all_permissions[perm.module] 
+                          if p['id'] == perm.id), None)
+                          
+            if not existing:
+                all_permissions[perm.module].append(perm_data)
+                
+        return all_permissions

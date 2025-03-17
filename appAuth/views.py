@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate , ShippingAddress , ShippingRate
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate , ShippingAddress , ShippingRate , StaffMember , StaffPermission , StaffRole
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -17,7 +17,7 @@ from rest_framework.permissions import AllowAny , IsAdminUser
 from django.utils import timezone
 from datetime import timedelta
 from .serializers import UserSerializer 
-from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer , CommissionActivationRequestSerializer ,ShipmentSerializer , PickupAddressSerializer , ShippingConfigSerializer 
+from home.serializers import CategorySerializer , ProductSerializer , PositionSerializer  , MLMMemberSerializer , MLMMemberListSerializer , TestimonialSerializer , AdvertisementSerializer , SuccessStorySerializer , CustomerPickSerializer , CompanyInfoSerializer , AboutSerializer , HomeSectionSerializer , MenuSerializer , CustomPageSerializer , KYCDocumentSerializer , BlogSerializer , AddressSerializer , CustomerProfileSerializer , OrderSerializer , WithdrawalRequestSerializer , WalletTransactionSerializer , WalletSerializer , BankDetailsSerializer , BankDetailsSerializerNew , NotificationSerializer , MLMMemberRegistrationSerializer , ContactSerializer , NewsletterSerializer , CustomerDetailSerializer , CustomerListSerializer , ProductListSerializer , MLMProfileSerializer , CommissionActivationRequestSerializer ,ShipmentSerializer , PickupAddressSerializer , ShippingConfigSerializer , StaffMemberDetailSerializer , StaffMemberListSerializer , StaffMemberCreateSerializer , StaffPermissionSerializer , StaffRoleSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -9117,3 +9117,291 @@ class PublicShippingRateView(APIView):
             'shipping_tax_percentage': float(config.tax_percentage),
             'total_shipping_cost': total_shipping
         })
+
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_calculate_commissions(request):
+    """
+    Admin endpoint to manually calculate and process commissions immediately
+    """
+    try:
+        # Get parameters
+        force_payment = request.data.get('force_payment', True)  # Default to true for testing
+        target_date = request.data.get('target_date')
+        specific_member = request.data.get('member_id')
+        
+        if target_date:
+            try:
+                target_date = datetime.strptime(target_date, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({
+                    'success': False,
+                    'message': 'Invalid date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            target_date = timezone.now().date()
+        from home.utils import calculate_commissions_admin
+        # Calculate commissions
+        result = calculate_commissions_admin(
+            target_date=target_date,
+            force_payment=force_payment,
+            specific_member=specific_member
+        )
+        
+        return Response({
+            'success': result['success'],
+            'message': result['message'],
+            'details': result['details']
+        })
+            
+    except Exception as e:
+        logger.error(f"Error in admin commission calculation: {str(e)}")
+        return Response({
+            'success': False,
+            'message': 'An error occurred during commission calculation',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
+class IsAdminOrSupervisor(permissions.BasePermission):
+    """Permission class to only allow admins or supervisors to access staff records"""
+    
+    def has_permission(self, request, view):
+        # Only allow admin users
+        return request.user.role == 'ADMIN'
+        
+    def has_object_permission(self, request, view, obj):
+        # Allow access to admin users
+        if request.user.role == 'ADMIN':
+            return True
+            
+        # Allow supervisors to access their subordinates
+        if hasattr(request.user, 'staff_profile'):
+            staff_member = request.user.staff_profile
+            
+            # Check if this is a subordinate
+            return obj.supervisor == staff_member
+            
+        return False
+
+
+class StaffPermissionViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing staff permissions"""
+    queryset = StaffPermission.objects.all()
+    serializer_class = StaffPermissionSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrSupervisor]
+    
+    def get_queryset(self):
+        queryset = StaffPermission.objects.all()
+        
+        # Filter by module
+        module = self.request.query_params.get('module')
+        if module:
+            queryset = queryset.filter(module=module)
+            
+        # Filter by active status
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+            
+        # Search by name or description
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(description__icontains=search)
+            )
+            
+        return queryset.order_by('module', 'name')
+        
+    @action(detail=False, methods=['get'])
+    def modules(self, request):
+        """Get list of all modules"""
+        modules = StaffPermission.objects.values_list('module', flat=True).distinct()
+        return Response(sorted(modules))
+        
+    @action(detail=False, methods=['get'])
+    def module_permissions(self, request):
+        """Get permissions grouped by modules"""
+        module_perms = {}
+        
+        # Group permissions by module
+        for module in StaffPermission.objects.values_list('module', flat=True).distinct():
+            module_perms[module] = StaffPermissionSerializer(
+                StaffPermission.objects.filter(module=module).order_by('name'),
+                many=True,
+                context={'request': request}
+            ).data
+            
+        return Response(module_perms)
+
+
+class StaffRoleViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing staff roles"""
+    queryset = StaffRole.objects.all()
+    serializer_class = StaffRoleSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrSupervisor]
+    
+    def get_queryset(self):
+        queryset = StaffRole.objects.all()
+        
+        # Filter by active status
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+            
+        # Search by name or description
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(description__icontains=search)
+            )
+            
+        return queryset.order_by('name')
+        
+    @action(detail=True, methods=['post'])
+    def toggle_status(self, request, pk=None):
+        """Toggle role active status"""
+        role = self.get_object()
+        role.is_active = not role.is_active
+        role.save()
+        
+        serializer = self.get_serializer(role)
+        return Response(serializer.data)
+        
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        """Get staff members with this role"""
+        role = self.get_object()
+        members = StaffMember.objects.filter(role=role)
+        
+        serializer = StaffMemberListSerializer(
+            members,
+            many=True,
+            context={'request': request}
+        )
+        
+        return Response(serializer.data)
+
+
+class StaffMemberViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing staff members"""
+    queryset = StaffMember.objects.all()
+    permission_classes = [permissions.IsAuthenticated, IsAdminOrSupervisor]
+    
+    def get_serializer_class(self):
+        if self.action == 'create' or self.action == 'update' or self.action == 'partial_update':
+            return StaffMemberCreateSerializer
+        elif self.action == 'list':
+            return StaffMemberListSerializer
+        return StaffMemberDetailSerializer
+    
+    def get_queryset(self):
+        queryset = StaffMember.objects.all()
+        
+        # Filter by role
+        role_id = self.request.query_params.get('role')
+        if role_id:
+            queryset = queryset.filter(role_id=role_id)
+            
+        # Filter by supervisor
+        supervisor_id = self.request.query_params.get('supervisor')
+        if supervisor_id:
+            queryset = queryset.filter(supervisor_id=supervisor_id)
+            
+        # Filter by department
+        department = self.request.query_params.get('department')
+        if department:
+            queryset = queryset.filter(department=department)
+            
+        # Filter by active status
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+            
+        # Search by name, email, or employee ID
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(user__first_name__icontains=search) |
+                Q(user__last_name__icontains=search) |
+                Q(user__email__icontains=search) |
+                Q(user__username__icontains=search) |
+                Q(employee_id__icontains=search)
+            )
+            
+        return queryset.select_related('user', 'role', 'supervisor').order_by('user__first_name', 'user__last_name')
+    
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        """Override to ensure user is also deleted"""
+        user = instance.user
+        instance.delete()
+        user.delete()
+    
+    @action(detail=True, methods=['post'])
+    def toggle_status(self, request, pk=None):
+        """Toggle staff member active status"""
+        staff_member = self.get_object()
+        staff_member.is_active = not staff_member.is_active
+        
+        # Also update the user's is_active status
+        user = staff_member.user
+        user.is_active = staff_member.is_active
+        
+        with transaction.atomic():
+            staff_member.save()
+            user.save()
+        
+        serializer = self.get_serializer(staff_member)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'])
+    def reset_password(self, request, pk=None):
+        """Reset staff member's password"""
+        staff_member = self.get_object()
+        new_password = request.data.get('new_password')
+        
+        if not new_password:
+            return Response(
+                {'error': 'New password is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Validate password
+        try:
+            validate_password(new_password, staff_member.user)
+        except ValidationError as e:
+            return Response(
+                {'error': e.messages},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Update password
+        user = staff_member.user
+        user.set_password(new_password)
+        user.save()
+        
+        return Response({'status': 'password set'})
+    
+    @action(detail=True, methods=['post'])
+    def update_permissions(self, request, pk=None):
+        """Update staff member's custom permissions"""
+        staff_member = self.get_object()
+        permission_ids = request.data.get('permission_ids', [])
+        
+        # Update custom permissions
+        staff_member.custom_permissions.set(permission_ids)
+        
+        serializer = self.get_serializer(staff_member)
+        return Response(serializer.data)
+        
+    @action(detail=False, methods=['get'])
+    def departments(self, request):
+        """Get list of all departments"""
+        departments = StaffMember.objects.exclude(
+            department=''
+        ).values_list('department', flat=True).distinct()
+        
+        return Response(sorted(departments))

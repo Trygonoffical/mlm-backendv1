@@ -19,7 +19,7 @@ from django.dispatch import receiver
 import logging
 from django.db.models import Sum,  Q
 from django.dispatch import receiver
-
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -520,7 +520,7 @@ class MLMMember(models.Model):
         
     def toggle_status(self):
         """Toggle status for both MLMMember and associated User"""
-        from django.db import transaction
+        
         
         with transaction.atomic():
             # Toggle MLMMember status
@@ -775,22 +775,22 @@ class BankDetails(models.Model):
     
 
 
-class Commission(models.Model):
-    member = models.ForeignKey(MLMMember, on_delete=models.CASCADE, related_name='earned_commissions')
-    from_member = models.ForeignKey(MLMMember, on_delete=models.CASCADE, related_name='generated_commissions')
-    order = models.ForeignKey(Order, on_delete=models.CASCADE)
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    date = models.DateTimeField(auto_now_add=True)
-    is_paid = models.BooleanField(default=False)
-    payment_date = models.DateTimeField(null=True, blank=True)
-    level = models.PositiveIntegerField()  # Level in the MLM hierarchy
-    # Add this to your existing Commission model
-    is_first_purchase_bonus = models.BooleanField(
-        default=False, 
-        help_text="Flag to indicate if this is a first purchase bonus commission"
-    )
-    is_reversed = models.BooleanField(default=False)
-    reversed_at = models.DateTimeField(null=True, blank=True)
+class Commission(models.Model): 
+    member = models.ForeignKey(MLMMember, on_delete=models.CASCADE, related_name='earned_commissions') 
+    from_member = models.ForeignKey(MLMMember, on_delete=models.CASCADE, related_name='generated_commissions') 
+    order = models.ForeignKey(Order, on_delete=models.CASCADE) 
+    amount = models.DecimalField(max_digits=10, decimal_places=2) 
+    date = models.DateTimeField(auto_now_add=True) 
+    is_paid = models.BooleanField(default=False) 
+    payment_date = models.DateTimeField(null=True, blank=True) 
+    level = models.PositiveIntegerField()  # Level in the MLM hierarchy 
+    # Add this to your existing Commission model 
+    is_first_purchase_bonus = models.BooleanField( 
+        default=False,  
+        help_text="Flag to indicate if this is a first purchase bonus commission" 
+    ) 
+    is_reversed = models.BooleanField(default=False) 
+    reversed_at = models.DateTimeField(null=True, blank=True) 
 
     # Type of commission
     COMMISSION_TYPES = (
@@ -819,13 +819,46 @@ class Commission(models.Model):
     def __str__(self):
         return f"Commission {self.id}: {self.amount} to {self.member.member_id} from {self.from_member.member_id}"
     
+    # def save(self, *args, **kwargs):
+    #     # If this is a monthly calculation, set the calculation_month
+    #     if self.commission_type == 'MONTHLY' and not self.calculation_month:
+    #         # Set to the first day of the current month
+    #         today = timezone.now()
+    #         self.calculation_month = today.replace(day=1).date()
+            
+    #     # Add details if they don't exist
+    #     if not self.details:
+    #         self.details = {
+    #             'member_position': self.member.position.name,
+    #             'member_percentage': float(self.member.position.discount_percentage),
+    #             'from_member_position': self.from_member.position.name,
+    #             'from_member_percentage': float(self.from_member.position.discount_percentage),
+    #             'difference_percentage': float(self.member.position.discount_percentage - self.from_member.position.discount_percentage)
+    #         }
+            
+    #     super().save(*args, **kwargs)
+        
+    #     # If this is being marked as paid, update member's total earnings
+    #     if self.is_paid and self.payment_date is None:
+    #         self.payment_date = timezone.now()
+    #         self.member.total_earnings += self.amount
+    #         self.member.save(update_fields=['total_earnings'])
     def save(self, *args, **kwargs):
-        # If this is a monthly calculation, set the calculation_month
+        # Check if this is a new commission or an existing one being modified
+        is_new = self.pk is None
+        
+        # If this is an existing commission, get the old version to check for changes
+        if not is_new:
+            old_commission = Commission.objects.get(pk=self.pk)
+            is_newly_paid = not old_commission.is_paid and self.is_paid
+        else:
+            is_newly_paid = self.is_paid
+        
+        # Set calculation_month for monthly commissions
         if self.commission_type == 'MONTHLY' and not self.calculation_month:
-            # Set to the first day of the current month
             today = timezone.now()
             self.calculation_month = today.replace(day=1).date()
-            
+        
         # Add details if they don't exist
         if not self.details:
             self.details = {
@@ -835,14 +868,40 @@ class Commission(models.Model):
                 'from_member_percentage': float(self.from_member.position.discount_percentage),
                 'difference_percentage': float(self.member.position.discount_percentage - self.from_member.position.discount_percentage)
             }
-            
+        
+        # Save the commission
         super().save(*args, **kwargs)
         
-        # If this is being marked as paid, update member's total earnings
-        if self.is_paid and self.payment_date is None:
+        # If this commission is being marked as paid for the first time
+        if is_newly_paid:
             self.payment_date = timezone.now()
-            self.member.total_earnings += self.amount
-            self.member.save(update_fields=['total_earnings'])
+            
+            # Use a transaction to ensure all or nothing updates
+            with transaction.atomic():
+                # 1. Update member's total earnings
+                self.member.total_earnings += self.amount
+                self.member.save(update_fields=['total_earnings'])
+                
+                # 2. Add to wallet balance
+                wallet, created = Wallet.objects.get_or_create(user=self.member.user)
+                
+                # 3. Create wallet transaction record
+                WalletTransaction.objects.create(
+                    wallet=wallet,
+                    amount=self.amount,
+                    transaction_type='COMMISSION',
+                    description=f'Commission from {self.from_member.user.get_full_name() or self.from_member.member_id}',
+                    reference_id=str(self.id)
+                )
+                
+                # 4. Update wallet balance
+                wallet.balance += self.amount
+                wallet.save()
+                
+                # 5. Save the payment date on the commission
+                if not self.payment_date:
+                    self.payment_date = timezone.now()
+                    super().save(update_fields=['payment_date'])
 
     @classmethod
     def get_monthly_earnings(cls, member, year=None, month=None):
@@ -2123,3 +2182,77 @@ class ShippingRate(models.Model):
         if not config:
             config = cls.objects.create()
         return config
+
+
+class StaffPermission(models.Model):
+    """Model to represent individual permissions for staff users"""
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    module = models.CharField(max_length=50, help_text="Module this permission belongs to")
+    is_active = models.BooleanField(default=True)
+    
+    class Meta:
+        ordering = ['module', 'name']
+        
+    def __str__(self):
+        return f"{self.module} - {self.name}"
+
+
+class StaffRole(models.Model):
+    """Model for staff roles with predefined permissions"""
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    permissions = models.ManyToManyField(StaffPermission, related_name='roles')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['name']
+        
+    def __str__(self):
+        return self.name
+
+
+class StaffMember(models.Model):
+    """Model for internal staff users with specific permissions"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='staff_profile')
+    role = models.ForeignKey(StaffRole, on_delete=models.PROTECT, related_name='staff_members')
+    custom_permissions = models.ManyToManyField(
+        StaffPermission, 
+        related_name='staff_members',
+        blank=True,
+        help_text="Additional permissions beyond the role"
+    )
+    supervisor = models.ForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='subordinates'
+    )
+    department = models.CharField(max_length=100, blank=True)
+    phone_regex = RegexValidator(
+        regex=r'^\+?1?\d{9,15}$',
+        message="Phone number must be entered in the format: '+999999999'. Up to 15 digits allowed."
+    )
+    phone_number = models.CharField(validators=[phone_regex], max_length=17, blank=True)
+    employee_id = models.CharField(max_length=20, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"{self.user.get_full_name()} ({self.role.name})"
+    
+    def has_permission(self, permission_name):
+        """Check if staff member has a specific permission"""
+        # Check if user has this permission directly
+        if self.custom_permissions.filter(name=permission_name, is_active=True).exists():
+            return True
+            
+        # Check if user's role has this permission
+        if self.role.permissions.filter(name=permission_name, is_active=True).exists():
+            return True
+            
+        return False

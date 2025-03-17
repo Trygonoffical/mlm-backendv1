@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 import logging
 from django.db.models import Sum, F, Q
-from home.models import Commission, Notification, MLMMember , Order , Position
+from home.models import Commission, Notification, MLMMember , Order , Position , Wallet , WalletTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -1516,3 +1516,372 @@ def process_first_payment(order):
     except Exception as e:
         logger.error(f"Error processing first payment bonus: {str(e)}")
         return False
+    
+
+# def calculate_commissions_admin(target_date=None, force_payment=False, specific_member=None):
+#     """
+#     Calculate commissions for testing or admin purposes
+    
+#     Args:
+#         target_date: The date to use for calculations
+#         force_payment: Whether to immediately mark commissions as paid
+#         specific_member: Optional member_id to calculate for just one member
+    
+#     Returns:
+#         dict: Result information
+#     """
+#     try:
+#         if not target_date:
+#             target_date = timezone.now().date()
+            
+#         # Calculate the month range - default to last month
+#         first_day_current_month = target_date.replace(day=1)
+#         last_month_end = first_day_current_month - timedelta(days=1)
+#         first_day_last_month = last_month_end.replace(day=1)
+        
+#         # Get all active MLM members or a specific member
+#         if specific_member:
+#             members = MLMMember.objects.filter(
+#                 member_id=specific_member,
+#                 is_active=True
+#             ).select_related('position', 'user')
+#         else:
+#             members = MLMMember.objects.filter(
+#                 is_active=True,
+#                 position__can_earn_commission=True  # Only include members who can earn commissions
+#             ).select_related('position', 'user')
+        
+#         if not members.exists():
+#             return {
+#                 'success': False,
+#                 'message': 'No eligible members found',
+#                 'details': {}
+#             }
+        
+#         # Track results
+#         commissions_created = 0
+#         total_amount = Decimal('0.00')
+#         member_results = []
+        
+#         # Process each member
+#         for member in members:
+#             # Check if member maintains monthly quota
+#             monthly_quota_maintained = member.check_monthly_quota_maintenance(
+#                 month=first_day_last_month
+#             )
+            
+#             if not monthly_quota_maintained:
+#                 member_results.append({
+#                     'member_id': member.member_id,
+#                     'name': member.user.get_full_name() or member.user.username,
+#                     'status': 'SKIPPED',
+#                     'reason': 'Monthly quota not maintained',
+#                     'commission_amount': '0.00'
+#                 })
+#                 continue
+            
+#             # Get all direct downline members
+#             downline = MLMMember.objects.filter(
+#                 sponsor=member,
+#                 is_active=True
+#             ).select_related('position', 'user')
+            
+#             # Calculate commissions for each downline
+#             member_commission_total = Decimal('0.00')
+#             for downline_member in downline:
+#                 # Only calculate if member's position percentage is higher
+#                 if member.position.discount_percentage <= downline_member.position.discount_percentage:
+#                     continue
+                
+#                 # Calculate percentage difference
+#                 difference_percentage = member.position.discount_percentage - downline_member.position.discount_percentage
+                
+#                 # Get downline's purchases for last month
+#                 downline_purchases = Order.objects.filter(
+#                     user=downline_member.user,
+#                     order_date__gte=first_day_last_month,
+#                     order_date__lt=first_day_current_month,
+#                     status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+#                 ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
+                
+#                 if downline_purchases > 0:
+#                     # Calculate commission
+#                     commission_amount = (downline_purchases * Decimal(str(difference_percentage))) / 100
+                    
+#                     if commission_amount > 0:
+#                         # Create commission record
+#                         commission = Commission.objects.create(
+#                             member=member,
+#                             from_member=downline_member,
+#                             order=None,  # Monthly calculation, not tied to a specific order
+#                             amount=commission_amount,
+#                             level=1,  # Direct downline
+#                             is_paid=force_payment,  # Set according to the force_payment parameter
+#                             commission_type='MONTHLY',
+#                             calculation_month=first_day_last_month,
+#                             details={
+#                                 'month': first_day_last_month.strftime('%Y-%m'),
+#                                 'percentage_difference': float(difference_percentage),
+#                                 'downline_purchases': float(downline_purchases),
+#                                 'member_position': member.position.name,
+#                                 'downline_position': downline_member.position.name
+#                             }
+#                         )
+                        
+#                         # If force_payment is True, update the wallet balance immediately
+#                         if force_payment:
+#                             # Update member's total earnings
+#                             member.total_earnings += commission_amount
+#                             member.save(update_fields=['total_earnings'])
+                            
+#                             # Update wallet
+#                             wallet, created = Wallet.objects.get_or_create(user=member.user)
+                            
+#                             # Create transaction record
+#                             WalletTransaction.objects.create(
+#                                 wallet=wallet,
+#                                 amount=commission_amount,
+#                                 transaction_type='COMMISSION',
+#                                 description=f'Monthly commission from {downline_member.user.get_full_name() or downline_member.member_id}',
+#                                 reference_id=str(commission.id)
+#                             )
+                            
+#                             # Update wallet balance
+#                             wallet.balance += commission_amount
+#                             wallet.save()
+                            
+#                             # Set payment date
+#                             commission.payment_date = timezone.now()
+#                             commission.save(update_fields=['payment_date'])
+                        
+#                         member_commission_total += commission_amount
+#                         commissions_created += 1
+            
+#             # Record result for this member
+#             member_results.append({
+#                 'member_id': member.member_id,
+#                 'name': member.user.get_full_name() or member.user.username,
+#                 'status': 'SUCCESS',
+#                 'commission_amount': str(member_commission_total),
+#                 'commissions_count': commissions_created
+#             })
+            
+#             total_amount += member_commission_total
+        
+#         return {
+#             'success': True,
+#             'message': f"Successfully calculated {commissions_created} commissions totaling ₹{total_amount}",
+#             'details': {
+#                 'date_range': f"{first_day_last_month} to {last_month_end}",
+#                 'members_processed': len(members),
+#                 'total_commissions': commissions_created,
+#                 'total_amount': str(total_amount),
+#                 'force_payment': force_payment,
+#                 'member_results': member_results
+#             }
+#         }
+        
+#     except Exception as e:
+#         logger.error(f"Error calculating admin commissions: {str(e)}")
+#         return {
+#             'success': False,
+#             'message': f"Error calculating commissions: {str(e)}",
+#             'details': {}
+#         }
+
+
+def calculate_commissions_admin(target_date=None, force_payment=False, specific_member=None, include_bp_transfer=True):
+    """
+    Calculate commissions for testing or admin purposes
+    
+    Args:
+        target_date: The date to use for calculations
+        force_payment: Whether to immediately mark commissions as paid
+        specific_member: Optional member_id to calculate for just one member
+        include_bp_transfer: Whether to include BP point transfers
+    
+    Returns:
+        dict: Result information
+    """
+    try:
+        if not target_date:
+            target_date = timezone.now().date()
+            
+        # Calculate the month range - default to last month
+        first_day_current_month = target_date.replace(day=1)
+        last_month_end = first_day_current_month - timedelta(days=1)
+        first_day_last_month = last_month_end.replace(day=1)
+        
+        # Get all active MLM members or a specific member
+        if specific_member:
+            members = MLMMember.objects.filter(
+                member_id=specific_member,
+                is_active=True
+            ).select_related('position', 'user')
+        else:
+            members = MLMMember.objects.filter(
+                is_active=True,
+                position__can_earn_commission=True  # Only include members who can earn commissions
+            ).select_related('position', 'user')
+        
+        if not members.exists():
+            return {
+                'success': False,
+                'message': 'No eligible members found',
+                'details': {}
+            }
+        
+        # Track results
+        commissions_created = 0
+        total_amount = Decimal('0.00')
+        total_bp_transferred = 0
+        member_results = []
+        
+        # Process each member
+        for member in members:
+            # Check if member maintains monthly quota
+            monthly_quota_maintained = member.check_monthly_quota_maintenance(
+                month=first_day_last_month
+            )
+            
+            if not monthly_quota_maintained:
+                member_results.append({
+                    'member_id': member.member_id,
+                    'name': member.user.get_full_name() or member.user.username,
+                    'status': 'SKIPPED',
+                    'reason': 'Monthly quota not maintained',
+                    'commission_amount': '0.00',
+                    'bp_transferred': 0
+                })
+                continue
+            
+            # Get all direct downline members
+            downline = MLMMember.objects.filter(
+                sponsor=member,
+                is_active=True
+            ).select_related('position', 'user')
+            
+            # Calculate commissions for each downline
+            member_commission_total = Decimal('0.00')
+            member_bp_total = 0
+            
+            for downline_member in downline:
+                # Process financial commission
+                # Only calculate if member's position percentage is higher
+                if member.position.discount_percentage <= downline_member.position.discount_percentage:
+                    continue
+                
+                # Calculate percentage difference
+                difference_percentage = member.position.discount_percentage - downline_member.position.discount_percentage
+                
+                # Get downline's purchases for last month
+                downline_purchases = Order.objects.filter(
+                    user=downline_member.user,
+                    order_date__gte=first_day_last_month,
+                    order_date__lt=first_day_current_month,
+                    status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+                ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0.00')
+                
+                # Process BP transfer from downline to sponsor if enabled
+                downline_bp = 0
+                if include_bp_transfer:
+                    downline_bp = downline_member.total_bp
+                    
+                    # Log the BP transfer
+                    logger.info(f"Transferring {downline_bp} BP from {downline_member.member_id} to {member.member_id}")
+                    
+                    # Add BP to the sponsor
+                    member.total_bp += downline_bp
+                    member_bp_total += downline_bp
+                    total_bp_transferred += downline_bp
+                
+                if downline_purchases > 0:
+                    # Calculate commission
+                    commission_amount = (downline_purchases * Decimal(str(difference_percentage))) / 100
+                    
+                    if commission_amount > 0:
+                        # Create commission record
+                        commission = Commission.objects.create(
+                            member=member,
+                            from_member=downline_member,
+                            order=None,  # Monthly calculation, not tied to a specific order
+                            amount=commission_amount,
+                            level=1,  # Direct downline
+                            is_paid=force_payment,  # Set according to the force_payment parameter
+                            commission_type='MONTHLY',
+                            calculation_month=first_day_last_month,
+                            details={
+                                'month': first_day_last_month.strftime('%Y-%m'),
+                                'percentage_difference': float(difference_percentage),
+                                'downline_purchases': float(downline_purchases),
+                                'member_position': member.position.name,
+                                'downline_position': downline_member.position.name,
+                                'bp_transferred': downline_bp
+                            }
+                        )
+                        
+                        # If force_payment is True, update the wallet balance immediately
+                        if force_payment:
+                            # Update member's total earnings
+                            member.total_earnings += commission_amount
+                            
+                            # Add transaction to the wallet
+                            wallet, created = Wallet.objects.get_or_create(user=member.user)
+                            
+                            # Create wallet transaction
+                            WalletTransaction.objects.create(
+                                wallet=wallet,
+                                amount=commission_amount,
+                                transaction_type='COMMISSION',
+                                description=f'Monthly commission from {downline_member.user.get_full_name() or downline_member.member_id}',
+                                reference_id=str(commission.id)
+                            )
+                            
+                            # Update wallet balance
+                            wallet.balance += commission_amount
+                            wallet.save()
+                            
+                            # Set payment date
+                            commission.payment_date = timezone.now()
+                            commission.save(update_fields=['payment_date'])
+                        
+                        member_commission_total += commission_amount
+                        commissions_created += 1
+            
+            # Save the member with updated BP points and earnings
+            member.save()
+            
+            # Record result for this member
+            member_results.append({
+                'member_id': member.member_id,
+                'name': member.user.get_full_name() or member.user.username,
+                'status': 'SUCCESS',
+                'commission_amount': str(member_commission_total),
+                'commissions_count': commissions_created,
+                'bp_transferred': member_bp_total
+            })
+            
+            total_amount += member_commission_total
+        
+        return {
+            'success': True,
+            'message': f"Successfully calculated {commissions_created} commissions totaling ₹{total_amount} and transferred {total_bp_transferred} BP",
+            'details': {
+                'date_range': f"{first_day_last_month} to {last_month_end}",
+                'members_processed': len(members),
+                'total_commissions': commissions_created,
+                'total_amount': str(total_amount),
+                'total_bp_transferred': total_bp_transferred,
+                'force_payment': force_payment,
+                'include_bp_transfer': include_bp_transfer,
+                'member_results': member_results
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error calculating admin commissions: {str(e)}")
+        return {
+            'success': False,
+            'message': f"Error calculating commissions: {str(e)}",
+            'details': {}
+        }
