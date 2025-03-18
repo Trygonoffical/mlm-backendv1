@@ -3961,7 +3961,7 @@ class MLMReportView(APIView):
 
     def generate_joining_report(self, period='daily', start_date=None, end_date=None):
         # Base queryset
-        queryset = MLMMember.objects.select_related('user')
+        queryset = MLMMember.objects.select_related('user', 'position')
         
         # Date filtering
         if start_date:
@@ -3996,18 +3996,31 @@ class MLMReportView(APIView):
             total_earnings=Sum('total_earnings')
         ).order_by('period')
         
-        # Prepare detailed report with usernames
+        # Prepare detailed report with usernames and member details
         detailed_report = []
         for item in joining_report:
-            # Get usernames for this period
+            # Get members for this period
             period_members = queryset.filter(
                 period=item['period']
             )
             
+            # Get usernames for this period (keep for backward compatibility)
             usernames = list(period_members.values_list('user__username', flat=True))
+            
+            # Get detailed member info
+            new_members_details = []
+            for member in period_members:
+                new_members_details.append({
+                    'member_id': member.member_id,
+                    'username': member.user.username,
+                    'full_name': member.user.get_full_name() or member.user.username,
+                    'position': member.position.name if member.position else 'N/A',
+                    'join_date': member.join_date.isoformat() if member.join_date else None
+                })
             
             report_item = dict(item)
             report_item['usernames'] = usernames
+            report_item['new_members_details'] = new_members_details
             detailed_report.append(report_item)
         
         return Response({
@@ -4172,7 +4185,7 @@ class MLMReportView(APIView):
         end_date = parse_date(end_date_str) if end_date_str else None
         
         # Base queryset
-        queryset = Order.objects.all()
+        queryset = Order.objects.prefetch_related('items', 'items__product')
         
         # Apply date filters
         if start_date:
@@ -4228,6 +4241,28 @@ class MLMReportView(APIView):
             avg_order_value=Avg('final_amount')
         ).order_by('period')
         
+        # Store product information for the entire report
+        product_list = []
+        if not product_id:  # Only if not filtering by a specific product
+            # Get top products across all filtered orders
+            top_products = OrderItem.objects.filter(
+                order__in=queryset
+            ).values(
+                'product__id',
+                'product__name'
+            ).annotate(
+                total_quantity=Sum('quantity'),
+                total_sales=Sum('final_price')
+            ).order_by('-total_quantity')[:10]  # Top 10 products
+            
+            for product in top_products:
+                product_list.append({
+                    'id': product['product__id'],
+                    'name': product['product__name'],
+                    'total_quantity': product['total_quantity'],
+                    'total_sales': float(product['total_sales'] or 0)
+                })
+        
         # Prepare report data
         report_data = []
         for item in sales_report:
@@ -4249,13 +4284,31 @@ class MLMReportView(APIView):
                 except Category.DoesNotExist:
                     pass
             
+            # Get product details for this period
+            period_orders = queryset.filter(period=item['period'])
+            
+            product_details = []
+            seen_products = set()  # To avoid duplicates
+            
+            for order in period_orders:
+                for order_item in order.items.all():
+                    product = order_item.product
+                    if product.id not in seen_products:
+                        product_details.append({
+                            'id': product.id,
+                            'name': product.name,
+                            'quantity': order_item.quantity
+                        })
+                        seen_products.add(product.id)
+            
             formatted_item = {
                 'period': period_str,
                 'total_orders': item['total_orders'],
                 'total_revenue': float(item['total_revenue'] or 0),
                 'total_bp': item['total_bp'] or 0,
                 'avg_order_value': float(item['avg_order_value'] or 0),
-                'category_name': category_name
+                'category_name': category_name,
+                'product_details': product_details
             }
             report_data.append(formatted_item)
 
@@ -4270,7 +4323,8 @@ class MLMReportView(APIView):
         return Response({
             'report_type': 'sales',
             'data': report_data,
-            'summary': summary
+            'summary': summary,
+            'product_list': product_list
         })
     # def generate_sales_report(self, mlm_member, start_date, end_date, period='monthly'):
     #     """Generate sales report with detailed order and revenue data"""
