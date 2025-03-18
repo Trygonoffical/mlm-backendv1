@@ -719,7 +719,8 @@ class MLMMemberSerializer(serializers.ModelSerializer):
             {
                 'date': withdrawal.created_at,
                 'amount': float(withdrawal.amount),
-                'status': withdrawal.status
+                # 'status': withdrawal.status
+                'transaction_type': withdrawal.transaction_type
             }
             for withdrawal in withdrawals
         ]
@@ -1570,7 +1571,7 @@ class WalletSerializer(serializers.ModelSerializer):
 class WalletTransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = WalletTransaction
-        fields = ['id', 'amount', 'status', 'description', 
+        fields = ['id', 'amount', 'transaction_type', 'description', 
                  'created_at', 'reference_id']
         read_only_fields = ['created_at']
 

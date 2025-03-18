@@ -8,7 +8,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate , ShippingAddress , ShippingRate , StaffMember , StaffPermission , StaffRole
+from home.models import PhoneOTP, User , HomeSlider , Category , Product , ProductImage , Position , MLMMember , Commission , WalletTransaction , Testimonial , Advertisement , SuccessStory , CustomerPickReview , CompanyInfo , About , HomeSection , HomeSectionType , Menu , CustomPage , KYCDocument , Blog , Address , Order , OrderItem ,  Wallet, WalletTransaction, WithdrawalRequest, BankDetails , Notification , Contact , Newsletter , PasswordResetRequest , CommissionActivationRequest , Shipment , PickupAddress , ShippingConfig , ShipmentStatusUpdate , ShippingAddress , ShippingRate , StaffMember , StaffPermission , StaffRole 
 from django.shortcuts import get_object_or_404
 import random
 from django.views.decorators.csrf import csrf_exempt
@@ -4070,66 +4070,34 @@ class MLMReportView(APIView):
             'data': report_data
         })
 
-    def generate_sales_report(self, params):
+    def generate_sales_report(self, mlm_member, start_date, end_date, period='monthly'):
         """Generate sales report with detailed order and revenue data"""
-        # Get parameters
-        start_date = params.get('start_date')
-        end_date = params.get('end_date')
-        period = params.get('period', 'daily')
-        category = params.get('category')
-        min_amount = params.get('min_amount')
-        max_amount = params.get('max_amount')
-        order_status = params.get('order_status')
-        
-        # Base queryset
-        queryset = Order.objects.all()
-        
-        # Apply date filters
-        if start_date:
-            queryset = queryset.filter(order_date__date__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(order_date__date__lte=end_date)
-            
-        # Apply status filter
-        if order_status:
-            queryset = queryset.filter(status=order_status)
-            
-        # Apply amount filters
-        if min_amount:
-            queryset = queryset.filter(final_amount__gte=min_amount)
-        if max_amount:
-            queryset = queryset.filter(final_amount__lte=max_amount)
-            
-        # Apply category filter (requires joining with OrderItem and Product)
-        if category:
-            queryset = queryset.filter(
-                items__product__categories__id=category
-            ).distinct()
+        # Filter orders for the specific member
+        orders = Order.objects.filter(
+            user=mlm_member.user,
+            order_date__date__gte=start_date,
+            order_date__date__lte=end_date,
+            status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+        )
         
         # Group by period
         if period == 'daily':
-            queryset = queryset.annotate(
-                period=TruncDay('order_date')
-            )
+            period_func = TruncDay('order_date')
         elif period == 'weekly':
-            queryset = queryset.annotate(
-                period=TruncWeek('order_date')
-            )
+            period_func = TruncWeek('order_date')
         elif period == 'monthly':
-            queryset = queryset.annotate(
-                period=TruncMonth('order_date')
-            )
+            period_func = TruncMonth('order_date')
         elif period == 'yearly':
-            queryset = queryset.annotate(
-                period=TruncYear('order_date')
-            )
+            period_func = TruncYear('order_date')
         else:
             return Response({
                 'error': 'Invalid period'
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Calculate aggregates by period
-        sales_report = queryset.values(
+        sales_report = orders.annotate(
+            period=period_func
+        ).values(
             'period'
         ).annotate(
             total_orders=Count('id'),
@@ -4138,47 +4106,168 @@ class MLMReportView(APIView):
             avg_order_value=Avg('final_amount')
         ).order_by('period')
         
-        # If category filter is applied, include the category name
-        if category:
-            try:
-                category_name = Category.objects.get(id=category).name
-                for item in sales_report:
-                    item['category_name'] = category_name
-            except Category.DoesNotExist:
-                pass
-        
-        # Calculate overall summary
+        # Prepare report data
+        report_data = []
+        for item in sales_report:
+            # Format period based on selected period type
+            if period == 'daily':
+                period_str = item['period'].strftime('%Y-%m-%d')
+            elif period == 'weekly':
+                period_str = f"Week {item['period'].strftime('%U')}, {item['period'].year}"
+            elif period == 'monthly':
+                period_str = item['period'].strftime('%b %Y')
+            elif period == 'yearly':
+                period_str = str(item['period'].year)
+            
+            formatted_item = {
+                'period': period_str,
+                'total_orders': item['total_orders'],
+                'total_revenue': float(item['total_revenue'] or 0),
+                'total_bp': item['total_bp'] or 0,
+                'avg_order_value': float(item['avg_order_value'] or 0)
+            }
+            report_data.append(formatted_item)
+
+        # Calculate summary
         summary = {
-            'total_revenue': queryset.aggregate(total=Sum('final_amount'))['total'] or 0,
-            'total_orders': queryset.count(),
-            'total_bp': queryset.aggregate(total=Sum('total_bp'))['total'] or 0,
-            'avg_order_value': queryset.aggregate(avg=Avg('final_amount'))['avg'] or 0
+            'total_revenue': float(orders.aggregate(total=Sum('final_amount'))['total'] or 0),
+            'total_orders': orders.count(),
+            'total_bp': orders.aggregate(total=Sum('total_bp'))['total'] or 0,
+            'avg_order_value': float(orders.aggregate(avg=Avg('final_amount'))['avg'] or 0)
         }
         
-        # Format the periods properly
-        formatted_report = []
-        for item in sales_report:
-            period_date = item['period']
-            if period == 'daily':
-                period_str = period_date.strftime('%Y-%m-%d')
-            elif period == 'weekly':
-                period_str = f"Week {period_date.strftime('%U')}, {period_date.year}"
-            elif period == 'monthly':
-                period_str = period_date.strftime('%b %Y')
-            elif period == 'yearly':
-                period_str = str(period_date.year)
-                
-            formatted_item = {
-                **{k: v for k, v in item.items() if k != 'period'},
-                'period': period_str
-            }
-            formatted_report.append(formatted_item)
-            
         return Response({
             'report_type': 'sales',
-            'data': formatted_report,
+            'data': report_data,
             'summary': summary
         })
+    # def generate_sales_report(self, mlm_member, start_date, end_date, period='monthly'):
+    #     """Generate sales report with detailed order and revenue data"""
+    #     # Get parameters
+    #     start_date = params.get('start_date')
+    #     end_date = params.get('end_date')
+    #     period = params.get('period', 'daily')
+    #     category = params.get('category')
+    #     min_amount = params.get('min_amount')
+    #     max_amount = params.get('max_amount')
+    #     order_status = params.get('order_status')
+        
+    #     # Base queryset
+    #     queryset = Order.objects.all()
+        
+    #     # Filter orders for the member
+    # # orders = Order.objects.filter(
+    # #     user=mlm_member.user,
+    # #     order_date__date__gte=start_date,
+    # #     order_date__date__lte=end_date,
+    # #     status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+    # # )
+    #     # Apply date filters
+    #     if start_date:
+    #         queryset = queryset.filter(order_date__date__gte=start_date)
+    #     if end_date:
+    #         queryset = queryset.filter(order_date__date__lte=end_date)
+            
+    #     # Apply status filter
+    #     if order_status:
+    #         queryset = queryset.filter(status=order_status)
+            
+    #     # Apply amount filters
+    #     if min_amount:
+    #         queryset = queryset.filter(final_amount__gte=min_amount)
+    #     if max_amount:
+    #         queryset = queryset.filter(final_amount__lte=max_amount)
+            
+    #     # Apply category filter (requires joining with OrderItem and Product)
+    #     if category:
+    #         queryset = queryset.filter(
+    #             items__product__categories__id=category
+    #         ).distinct()
+        
+    #     # Group by period
+    #     if period == 'daily':
+    #         queryset = queryset.annotate(
+    #             period=TruncDay('order_date')
+    #         )
+    #     elif period == 'weekly':
+    #         queryset = queryset.annotate(
+    #             period=TruncWeek('order_date')
+    #         )
+    #     elif period == 'monthly':
+    #         queryset = queryset.annotate(
+    #             period=TruncMonth('order_date')
+    #         )
+    #     elif period == 'yearly':
+    #         queryset = queryset.annotate(
+    #             period=TruncYear('order_date')
+    #         )
+    #     else:
+    #         return Response({
+    #             'error': 'Invalid period'
+    #         }, status=status.HTTP_400_BAD_REQUEST)
+        
+    #     # Calculate aggregates by period
+    #     sales_report = queryset.values(
+    #         'period'
+    #     ).annotate(
+    #         total_orders=Count('id'),
+    #         total_revenue=Sum('final_amount'),
+    #         total_bp=Sum('total_bp'),
+    #         avg_order_value=Avg('final_amount')
+    #     ).order_by('period')
+        
+    #     # If category filter is applied, include the category name
+    #     if category:
+    #         try:
+    #             category_name = Category.objects.get(id=category).name
+    #             for item in sales_report:
+    #                 item['category_name'] = category_name
+    #         except Category.DoesNotExist:
+    #             pass
+        
+    #     report_data = []
+    #     for item in sales_report:
+    #         formatted_item = {
+    #             'period': self.format_period(item['period'], period),
+    #             'total_orders': item['total_orders'],
+    #             'total_revenue': float(item['total_revenue'] or 0),
+    #             'total_bp': item['total_bp'] or 0,
+    #             'avg_order_value': float(item['avg_order_value'] or 0)
+    #         }
+    #         report_data.append(formatted_item)
+
+    #     # Calculate overall summary
+    #     summary = {
+    #         'total_revenue': float(orders.aggregate(total=Sum('final_amount'))['total'] or 0),
+    #         'total_orders': orders.count(),
+    #         'total_bp': orders.aggregate(total=Sum('total_bp'))['total'] or 0,
+    #         'avg_order_value': float(orders.aggregate(avg=Avg('final_amount'))['avg'] or 0)
+    #     }
+        
+    #     # Format the periods properly
+    #     formatted_report = []
+    #     for item in sales_report:
+    #         period_date = item['period']
+    #         if period == 'daily':
+    #             period_str = period_date.strftime('%Y-%m-%d')
+    #         elif period == 'weekly':
+    #             period_str = f"Week {period_date.strftime('%U')}, {period_date.year}"
+    #         elif period == 'monthly':
+    #             period_str = period_date.strftime('%b %Y')
+    #         elif period == 'yearly':
+    #             period_str = str(period_date.year)
+                
+    #         formatted_item = {
+    #             **{k: v for k, v in item.items() if k != 'period'},
+    #             'period': period_str
+    #         }
+    #         formatted_report.append(formatted_item)
+            
+    #     return Response({
+    #         'report_type': 'sales',
+    #         'data': formatted_report,
+    #         'summary': summary
+    #     })
 
 
 class MLMDashboardView(APIView):
@@ -7373,23 +7462,10 @@ class MLMMemberReportsView(APIView):
             'data': report_data
         })
 
-    def generate_network_growth_report(self, request, start_date=None, end_date=None, period='monthly'):
+    def generate_network_growth_report(self, member, start_date=None, end_date=None, period='monthly'):
         """
-        Generate network growth report with detailed membership and sales data
+        Generate network growth report with detailed member information
         """
-        # Convert start_date and end_date from string to date if they're provided
-        if isinstance(start_date, str):
-            try:
-                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
-            except (ValueError, TypeError):
-                start_date = None
-
-        if isinstance(end_date, str):
-            try:
-                end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
-            except (ValueError, TypeError):
-                end_date = None
-
         # Determine period-based grouping
         if period == 'daily':
             period_func = TruncDay('join_date')
@@ -7401,23 +7477,16 @@ class MLMMemberReportsView(APIView):
             period_func = TruncMonth('join_date')
 
         # Base queryset with optional date filtering
-        if request.user.role == 'ADMIN':
-            # For admin, get all members
-            queryset = MLMMember.objects.all()
-        else:
-            # For MLM member, get their network
-            current_member = request.user.mlm_profile
-            
-            # Recursive function to get entire downline
-            def get_network_members(member):
-                network = [member]
-                referrals = MLMMember.objects.filter(sponsor=member)
-                for referral in referrals:
-                    network.extend(get_network_members(referral))
-                return network
-            
-            network_members = get_network_members(current_member)
-            queryset = MLMMember.objects.filter(id__in=[m.id for m in network_members])
+        # Get entire network for the current member
+        def get_network_members(current_member):
+            network = [current_member]
+            referrals = MLMMember.objects.filter(sponsor=current_member)
+            for referral in referrals:
+                network.extend(get_network_members(referral))
+            return network
+        
+        network_members = get_network_members(member)
+        queryset = MLMMember.objects.filter(id__in=[m.id for m in network_members])
 
         # Apply date filters if provided
         if start_date:
@@ -7432,7 +7501,6 @@ class MLMMemberReportsView(APIView):
             'period'
         ).annotate(
             new_members=Count('id'),
-            total_network_size=Count('id'),  # This might need adjustment for true network size
             total_bp=Sum('total_bp'),
             total_sales=Sum(
                 'user__orders__final_amount', 
@@ -7444,24 +7512,61 @@ class MLMMemberReportsView(APIView):
             ) or Decimal('0.00')
         ).order_by('period')
 
-        # Format period based on period type
+        # Recursive function to count total network size
+        def count_total_network_size(current_member):
+            total_size = 1  # Count the current member
+            referrals = MLMMember.objects.filter(sponsor=current_member)
+            for referral in referrals:
+                total_size += count_total_network_size(referral)
+            return total_size
+
+        # Prepare detailed new members information
+        def get_new_members_details(period_start):
+            new_members = MLMMember.objects.filter(
+                join_date__gte=period_start,
+                join_date__lt=period_start + timezone.timedelta(days=1)
+            ).select_related('user', 'position')
+            
+            return [
+                {
+                    'member_id': member.member_id,
+                    'username': member.user.username,
+                    'full_name': member.user.get_full_name(),
+                    'position': member.position.name if member.position else 'N/A',
+                    'join_date': member.join_date
+                }
+                for member in new_members
+            ]
+
+        # Format and process the growth data
         formatted_growth = []
         for entry in network_growth:
             try:
+                # Format period based on period type
                 if period == 'daily':
                     period_str = entry['period'].strftime('%Y-%m-%d')
+                    period_start = entry['period']
                 elif period == 'weekly':
                     period_str = f"Week {entry['period'].strftime('%U')}, {entry['period'].year}"
+                    period_start = entry['period']
                 elif period == 'yearly':
                     period_str = str(entry['period'].year)
+                    period_start = entry['period'].replace(month=1, day=1)
                 else:  # monthly
                     period_str = entry['period'].strftime('%B %Y')
+                    period_start = entry['period']
+
+                # Calculate total network size
+                network_size = count_total_network_size(member)
                 
-                # Safely handle potential None values
+                # Get new members details
+                new_members_details = get_new_members_details(period_start)
+                
                 formatted_growth.append({
                     'period': period_str,
                     'new_members': entry.get('new_members', 0),
-                    'total_network_size': entry.get('total_network_size', 0),
+                    'new_members_details': new_members_details,
+                    'total_network_size': network_size,
                     'total_bp': entry.get('total_bp', 0),
                     'total_sales': float(entry.get('total_sales', 0) or 0)
                 })
