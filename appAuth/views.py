@@ -2712,35 +2712,89 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
 #------------------------ Wallet Section ------------------------------
 
 class WalletViewSet(viewsets.ModelViewSet):
+    # serializer_class = WalletSerializer
+    # permission_classes = [IsAuthenticated]
+
+    # def get_queryset(self):
+    #     return Wallet.objects.filter(user=self.request.user)
+
+    # @action(detail=False, methods=['post'])
+    # def withdraw(self, request):
+    #     amount = request.data.get('amount')
+    #     if not amount:
+    #         return Response({'error': 'Amount is required'}, 
+    #                       status=status.HTTP_400_BAD_REQUEST)
+
+    #     try:
+    #         amount = Decimal(amount)
+    #     except:
+    #         return Response({'error': 'Invalid amount'}, 
+    #                       status=status.HTTP_400_BAD_REQUEST)
+
+    #     wallet = request.user.wallet
+    #     if amount > wallet.balance:
+    #         return Response({'error': 'Insufficient balance'}, 
+    #                       status=status.HTTP_400_BAD_REQUEST)
+
+    #     # Create withdrawal request
+    #     withdrawal = WithdrawalRequest.objects.create(
+    #         wallet=wallet,
+    #         amount=amount
+    #     )
+
+    #     return Response(WithdrawalRequestSerializer(withdrawal).data)
     serializer_class = WalletSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Wallet.objects.filter(user=self.request.user)
+        # Add select_related and prefetch_related for performance
+        return Wallet.objects.filter(user=self.request.user)\
+            .select_related('user')\
+            .prefetch_related(
+                'transactions',
+                'withdrawal_requests'
+            )
 
     @action(detail=False, methods=['post'])
     def withdraw(self, request):
         amount = request.data.get('amount')
         if not amount:
-            return Response({'error': 'Amount is required'}, 
-                          status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                'error': 'Amount is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            amount = Decimal(amount)
+            amount = Decimal(str(amount))
         except:
-            return Response({'error': 'Invalid amount'}, 
-                          status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                'error': 'Invalid amount'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         wallet = request.user.wallet
         if amount > wallet.balance:
-            return Response({'error': 'Insufficient balance'}, 
-                          status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                'error': 'Insufficient balance'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Create withdrawal request
         withdrawal = WithdrawalRequest.objects.create(
             wallet=wallet,
-            amount=amount
+            amount=amount,
+            status='PENDING'
         )
+
+        # Create transaction record for the withdrawal
+        WalletTransaction.objects.create(
+            wallet=wallet,
+            amount=amount,
+            transaction_type='WITHDRAWAL',
+            description=f'Withdrawal request #{withdrawal.id}',
+            reference_id=str(withdrawal.id)
+        )
+
+        # Update wallet balance
+        wallet.balance -= amount
+        wallet.save()
 
         return Response(WithdrawalRequestSerializer(withdrawal).data)
 

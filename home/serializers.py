@@ -12,6 +12,9 @@ from django.utils.text import slugify
 from django.core.validators import RegexValidator
 import logging
 from django.db import transaction
+from django.db import models
+from decimal import Decimal
+
 
 logger = logging.getLogger(__name__)
 
@@ -1555,17 +1558,39 @@ class BankDetailsSerializer(serializers.ModelSerializer):
                  'bank_name', 'branch_name']
 
 class WalletSerializer(serializers.ModelSerializer):
-    pending_withdrawals = serializers.DecimalField(
-        max_digits=10, decimal_places=2, read_only=True
-    )
-    total_earnings = serializers.DecimalField(
-        max_digits=10, decimal_places=2, read_only=True
-    )
-
+    total_earnings = serializers.SerializerMethodField()
+    pending_withdrawals = serializers.SerializerMethodField()
+    
     class Meta:
         model = Wallet
-        fields = ['id', 'balance', 'pending_withdrawals', 
-                 'total_earnings', 'last_updated']
+        fields = ['id', 'balance', 'total_earnings', 'pending_withdrawals', 'last_updated']
+
+    def get_total_earnings(self, obj):
+        # Sum all commission transactions
+        total = WalletTransaction.objects.filter(
+            wallet=obj,
+            transaction_type='COMMISSION',
+        ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
+        return float(total)
+
+    def get_pending_withdrawals(self, obj):
+        # Sum all pending withdrawal requests
+        pending = WithdrawalRequest.objects.filter(
+            wallet=obj,
+            status='PENDING'
+        ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
+        return float(pending)
+    # pending_withdrawals = serializers.DecimalField(
+    #     max_digits=10, decimal_places=2, read_only=True
+    # )
+    # total_earnings = serializers.DecimalField(
+    #     max_digits=10, decimal_places=2, read_only=True
+    # )
+
+    # class Meta:
+    #     model = Wallet
+    #     fields = ['id', 'balance', 'pending_withdrawals', 
+    #              'total_earnings', 'last_updated']
 
 class WalletTransactionSerializer(serializers.ModelSerializer):
     class Meta:
