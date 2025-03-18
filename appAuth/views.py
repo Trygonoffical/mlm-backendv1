@@ -33,6 +33,7 @@ from home.serializers import HomeSliderSerializer
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
 import time 
+from django.utils.dateparse import parse_date
 import traceback
 import razorpay
 from django.db import models
@@ -3941,10 +3942,24 @@ class MLMReportView(APIView):
             total_earnings=Sum('total_earnings')
         ).order_by('period')
         
+        # Prepare detailed report with usernames
+        detailed_report = []
+        for item in joining_report:
+            # Get usernames for this period
+            period_members = queryset.filter(
+                period=item['period']
+            )
+            
+            usernames = list(period_members.values_list('user__username', flat=True))
+            
+            report_item = dict(item)
+            report_item['usernames'] = usernames
+            detailed_report.append(report_item)
+        
         return Response({
             'report_type': 'joining',
             'period': period,
-            'data': list(joining_report)
+            'data': detailed_report
         })
 
     def generate_member_search_report(self, params):
@@ -4089,8 +4104,8 @@ class MLMReportView(APIView):
     def generate_sales_report(self, params):
         """Generate sales report with detailed order and revenue data"""
         # Extract parameters
-        start_date = params.get('start_date')
-        end_date = params.get('end_date')
+        start_date_str = params.get('start_date')
+        end_date_str = params.get('end_date')
         period = params.get('period', 'monthly')
         category = params.get('category')
         product_id = params.get('product_id')
@@ -4098,27 +4113,29 @@ class MLMReportView(APIView):
         max_amount = params.get('max_amount')
         order_status = params.get('order_status')
         
+        # Parse dates safely
+        start_date = parse_date(start_date_str) if start_date_str else None
+        end_date = parse_date(end_date_str) if end_date_str else None
+        
         # Base queryset
         queryset = Order.objects.all()
         
         # Apply date filters
         if start_date:
-            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
             queryset = queryset.filter(order_date__date__gte=start_date)
         if end_date:
-            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
             queryset = queryset.filter(order_date__date__lte=end_date)
-            
+                
         # Apply status filter
         if order_status:
             queryset = queryset.filter(status=order_status)
-            
+                
         # Apply amount filters
         if min_amount:
             queryset = queryset.filter(final_amount__gte=min_amount)
         if max_amount:
             queryset = queryset.filter(final_amount__lte=max_amount)
-            
+                
         # Apply category filter
         if category:
             queryset = queryset.filter(
@@ -4166,7 +4183,7 @@ class MLMReportView(APIView):
             elif period == 'weekly':
                 period_str = f"Week {item['period'].strftime('%U')}, {item['period'].year}"
             elif period == 'monthly':
-                period_str = item['period'].strftime('%b %Y')
+                period_str = item['period'].strftime('%B %Y')
             elif period == 'yearly':
                 period_str = str(item['period'].year)
             
