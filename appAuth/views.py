@@ -3850,6 +3850,7 @@ class MLMReportView(APIView):
                 return self.generate_custom_report(request.query_params)
             
             elif report_type == 'sales':
+                # Pass all relevant parameters for sales report
                 return self.generate_sales_report(request.query_params)
             
             else:
@@ -3858,7 +3859,7 @@ class MLMReportView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
         
         except Exception as e:
-            logger.error(f"Error generating report: {e}")
+            logger.error(f"Error generating report: {e}", exc_info=True)
             return Response({
                 'error': 'Failed to generate report',
                 'details': str(e)
@@ -3866,7 +3867,7 @@ class MLMReportView(APIView):
 
     # Your existing methods remain unchanged
     def generate_level_wise_report(self, start_date=None, end_date=None):
-        # Base queryset with optional date filtering
+        # Update to include username
         queryset = MLMMember.objects.select_related('position', 'user')
         
         if start_date:
@@ -3884,9 +3885,21 @@ class MLMReportView(APIView):
             avg_monthly_purchase=Avg('current_month_purchase')
         ).order_by('position__level_order')
         
+        # Add usernames to the report
+        detailed_report = []
+        for item in level_report:
+            # Get usernames for this position
+            usernames = list(queryset.filter(
+                position__name=item['position__name']
+            ).values_list('user__username', flat=True))
+            
+            report_item = dict(item)
+            report_item['usernames'] = usernames
+            detailed_report.append(report_item)
+        
         return Response({
             'report_type': 'level_wise',
-            'data': list(level_report)
+            'data': detailed_report
         })
 
     def generate_joining_report(self, period='daily', start_date=None, end_date=None):
@@ -4071,15 +4084,50 @@ class MLMReportView(APIView):
             'data': report_data
         })
 
-    def generate_sales_report(self, mlm_member, start_date, end_date, period='monthly'):
+    def generate_sales_report(self, params):
         """Generate sales report with detailed order and revenue data"""
-        # Filter orders for the specific member
-        orders = Order.objects.filter(
-            user=mlm_member.user,
-            order_date__date__gte=start_date,
-            order_date__date__lte=end_date,
-            status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
-        )
+        # Extract parameters
+        start_date = params.get('start_date')
+        end_date = params.get('end_date')
+        period = params.get('period', 'monthly')
+        category = params.get('category')
+        product_id = params.get('product_id')
+        min_amount = params.get('min_amount')
+        max_amount = params.get('max_amount')
+        order_status = params.get('order_status')
+        
+        # Base queryset
+        queryset = Order.objects.all()
+        
+        # Apply date filters
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            queryset = queryset.filter(order_date__date__gte=start_date)
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            queryset = queryset.filter(order_date__date__lte=end_date)
+            
+        # Apply status filter
+        if order_status:
+            queryset = queryset.filter(status=order_status)
+            
+        # Apply amount filters
+        if min_amount:
+            queryset = queryset.filter(final_amount__gte=min_amount)
+        if max_amount:
+            queryset = queryset.filter(final_amount__lte=max_amount)
+            
+        # Apply category filter
+        if category:
+            queryset = queryset.filter(
+                items__product__categories__id=category
+            ).distinct()
+        
+        # Apply product filter
+        if product_id:
+            queryset = queryset.filter(
+                items__product_id=product_id
+            ).distinct()
         
         # Group by period
         if period == 'daily':
@@ -4096,7 +4144,7 @@ class MLMReportView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Calculate aggregates by period
-        sales_report = orders.annotate(
+        sales_report = queryset.annotate(
             period=period_func
         ).values(
             'period'
@@ -4120,21 +4168,30 @@ class MLMReportView(APIView):
             elif period == 'yearly':
                 period_str = str(item['period'].year)
             
+            # Get category name if category filter was applied
+            category_name = None
+            if category:
+                try:
+                    category_name = Category.objects.get(id=category).name
+                except Category.DoesNotExist:
+                    pass
+            
             formatted_item = {
                 'period': period_str,
                 'total_orders': item['total_orders'],
                 'total_revenue': float(item['total_revenue'] or 0),
                 'total_bp': item['total_bp'] or 0,
-                'avg_order_value': float(item['avg_order_value'] or 0)
+                'avg_order_value': float(item['avg_order_value'] or 0),
+                'category_name': category_name
             }
             report_data.append(formatted_item)
 
         # Calculate summary
         summary = {
-            'total_revenue': float(orders.aggregate(total=Sum('final_amount'))['total'] or 0),
-            'total_orders': orders.count(),
-            'total_bp': orders.aggregate(total=Sum('total_bp'))['total'] or 0,
-            'avg_order_value': float(orders.aggregate(avg=Avg('final_amount'))['avg'] or 0)
+            'total_revenue': float(queryset.aggregate(total=Sum('final_amount'))['total'] or 0),
+            'total_orders': queryset.count(),
+            'total_bp': queryset.aggregate(total=Sum('total_bp'))['total'] or 0,
+            'avg_order_value': float(queryset.aggregate(avg=Avg('final_amount'))['avg'] or 0)
         }
         
         return Response({
