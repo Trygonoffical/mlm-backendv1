@@ -1908,12 +1908,17 @@ class ShipmentStatusUpdateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at']
 
+class OrderMinimalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Order
+        fields = ['id', 'order_number', 'order_date', 'status']
 
 class ShipmentSerializer(serializers.ModelSerializer):
     """Serializer for Shipment model"""
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     status_updates = ShipmentStatusUpdateSerializer(many=True, read_only=True)
     tracking_link = serializers.SerializerMethodField()
+    order = OrderMinimalSerializer(read_only=True)
     
     class Meta:
         model = Shipment

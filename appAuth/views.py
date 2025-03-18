@@ -6988,7 +6988,8 @@ class ShipmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if user.role == 'ADMIN':
-            return Shipment.objects.all()
+            # return Shipment.objects.all()
+            return Shipment.objects.select_related('order').all()
         else:
             return Shipment.objects.filter(order__user=user)
     def create(self, request, *args, **kwargs):
