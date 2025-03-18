@@ -3867,7 +3867,7 @@ class MLMReportView(APIView):
 
     # Your existing methods remain unchanged
     def generate_level_wise_report(self, start_date=None, end_date=None):
-        # Update to include username
+        # Base queryset with optional date filtering
         queryset = MLMMember.objects.select_related('position', 'user')
         
         if start_date:
@@ -3885,13 +3885,15 @@ class MLMReportView(APIView):
             avg_monthly_purchase=Avg('current_month_purchase')
         ).order_by('position__level_order')
         
-        # Add usernames to the report
+        # Prepare detailed report with usernames
         detailed_report = []
         for item in level_report:
             # Get usernames for this position
-            usernames = list(queryset.filter(
+            position_members = queryset.filter(
                 position__name=item['position__name']
-            ).values_list('user__username', flat=True))
+            )
+            
+            usernames = list(position_members.values_list('user__username', flat=True))
             
             report_item = dict(item)
             report_item['usernames'] = usernames
