@@ -4660,6 +4660,7 @@ class MLMDashboardView(APIView):
                 'name': product.name,
                 'slug': product.slug,
                 'price': float(product.selling_price),
+                'gst': float(product.gst_percentage),
                 'image': product.get_feature_image_url(self.request)
             } for product in featured_products]
             
