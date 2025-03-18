@@ -33,6 +33,7 @@ from home.serializers import HomeSliderSerializer
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
 import time 
+import traceback
 import razorpay
 from django.db import models
 from django.shortcuts import get_object_or_404
@@ -7348,57 +7349,107 @@ class MLMMemberReportsView(APIView):
         """
         Generate personal sales report
         """
-        # Filter orders for the member
-        orders = Order.objects.filter(
-            user=mlm_member.user,
-            order_date__date__gte=start_date,
-            order_date__date__lte=end_date,
-            status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
-        )
+        try:
+            # Filter orders for the member
+            orders = Order.objects.filter(
+                user=mlm_member.user,
+                order_date__date__gte=start_date,
+                order_date__date__lte=end_date,
+                status__in=['CONFIRMED', 'SHIPPED', 'DELIVERED']
+            )
 
-        # Group by period
-        if period == 'daily':
-            period_func = TruncDay('order_date')
-        elif period == 'weekly':
-            period_func = TruncWeek('order_date')
-        else:  # monthly
-            period_func = TruncMonth('order_date')
+            # Logging to help diagnose issues
+            logger.info(f"Member: {mlm_member.member_id}")
+            logger.info(f"Start Date: {start_date}")
+            logger.info(f"End Date: {end_date}")
+            logger.info(f"Total Orders Found: {orders.count()}")
 
-        # Aggregate sales data
-        sales_report = orders.annotate(
-            period=period_func
-        ).values('period').annotate(
-            total_orders=Count('id'),
-            total_revenue=Sum('final_amount'),
-            total_bp=Sum('total_bp'),
-            avg_order_value=Avg('final_amount')
-        ).order_by('period')
+            # Group by period
+            if period == 'daily':
+                period_func = TruncDay('order_date')
+            elif period == 'weekly':
+                period_func = TruncWeek('order_date')
+            else:  # monthly
+                period_func = TruncMonth('order_date')
 
-        # Convert to list and format periods
-        report_data = []
-        for item in sales_report:
-            formatted_item = {
-                'period': self.format_period(item['period'], period),
-                'total_orders': item['total_orders'],
-                'total_revenue': float(item['total_revenue']),
-                'total_bp': item['total_bp'],
-                'avg_order_value': float(item['avg_order_value'])
-            }
-            report_data.append(formatted_item)
+            try:
+                # Aggregate sales data
+                sales_report = orders.annotate(
+                    period=period_func
+                ).values('period').annotate(
+                    total_orders=Count('id'),
+                    total_revenue=Sum('final_amount'),
+                    total_bp=Sum('total_bp'),
+                    avg_order_value=Avg('final_amount')
+                ).order_by('period')
 
-        # Calculate summary
-        summary = {
-            'total_revenue': float(orders.aggregate(total=Sum('final_amount'))['total'] or 0),
-            'total_orders': orders.count(),
-            'total_bp': orders.aggregate(total=Sum('total_bp'))['total'] or 0,
-            'avg_order_value': float(orders.aggregate(avg=Avg('final_amount'))['avg'] or 0)
-        }
+                logger.info(f"Sales Report Raw Data: {list(sales_report)}")
 
-        return Response({
-            'report_type': 'sales',
-            'data': report_data,
-            'summary': summary
-        })
+                # Convert to list and format periods
+                report_data = []
+                for item in sales_report:
+                    try:
+                        # Format period based on period type
+                        if period == 'daily':
+                            period_str = item['period'].strftime('%Y-%m-%d')
+                        elif period == 'weekly':
+                            period_str = f"Week {item['period'].strftime('%U')}, {item['period'].year}"
+                        elif period == 'monthly':
+                            period_str = item['period'].strftime('%B %Y')
+                        else:
+                            period_str = str(item['period'])
+
+                        formatted_item = {
+                            'period': period_str,
+                            'total_orders': item['total_orders'],
+                            'total_revenue': float(item['total_revenue'] or 0),
+                            'total_bp': item['total_bp'] or 0,
+                            'avg_order_value': float(item['avg_order_value'] or 0)
+                        }
+                        report_data.append(formatted_item)
+                    except Exception as format_error:
+                        logger.error(f"Error formatting sales report item: {str(format_error)}")
+
+                # Calculate summary
+                summary = {
+                    'total_revenue': float(orders.aggregate(total=Sum('final_amount'))['total'] or 0),
+                    'total_orders': orders.count(),
+                    'total_bp': orders.aggregate(total=Sum('total_bp'))['total'] or 0,
+                    'avg_order_value': float(orders.aggregate(avg=Avg('final_amount'))['avg'] or 0)
+                }
+
+                return Response({
+                    'report_type': 'sales',
+                    'data': report_data,
+                    'summary': summary
+                })
+
+            except Exception as aggregate_error:
+                logger.error(f"Error in sales report aggregation: {str(aggregate_error)}")
+                return Response({
+                    'error': f'Failed to aggregate sales data: {str(aggregate_error)}'
+                }, status=500)
+
+        except Exception as e:
+            logger.error(f"Comprehensive Sales Report Error: {str(e)}")
+            logger.error(f"Error Details: {traceback.format_exc()}")
+            return Response({
+                'error': f'Failed to generate sales report: {str(e)}'
+            }, status=500)
+
+    def format_period(self, period, period_type):
+        """Helper method to format period"""
+        try:
+            if period_type == 'daily':
+                return period.strftime('%Y-%m-%d')
+            elif period_type == 'weekly':
+                return f"Week {period.strftime('%U')}, {period.year}"
+            elif period_type == 'monthly':
+                return period.strftime('%B %Y')
+            return str(period)
+        except Exception as e:
+            logger.error(f"Period formatting error: {str(e)}")
+            return str(period)
 
     def generate_team_performance_report(self, mlm_member, start_date, end_date):
         """
