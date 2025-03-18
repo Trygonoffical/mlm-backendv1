@@ -4265,16 +4265,33 @@ class MLMReportView(APIView):
         
         # Prepare report data
         report_data = []
+        
         for item in sales_report:
             # Format period based on selected period type
             if period == 'daily':
                 period_str = item['period'].strftime('%Y-%m-%d')
+                # Get start and end of this day for filtering
+                period_start = item['period']
+                period_end = period_start + timezone.timedelta(days=1)
             elif period == 'weekly':
                 period_str = f"Week {item['period'].strftime('%U')}, {item['period'].year}"
+                # Get start and end of this week for filtering
+                period_start = item['period']
+                period_end = period_start + timezone.timedelta(days=7)
             elif period == 'monthly':
                 period_str = item['period'].strftime('%B %Y')
+                # Get start and end of this month for filtering
+                period_start = item['period']
+                # Move to first day of next month
+                if period_start.month == 12:
+                    period_end = period_start.replace(year=period_start.year + 1, month=1, day=1)
+                else:
+                    period_end = period_start.replace(month=period_start.month + 1, day=1)
             elif period == 'yearly':
                 period_str = str(item['period'].year)
+                # Get start and end of this year for filtering
+                period_start = item['period']
+                period_end = period_start.replace(year=period_start.year + 1, month=1, day=1)
             
             # Get category name if category filter was applied
             category_name = None
@@ -4285,21 +4302,30 @@ class MLMReportView(APIView):
                     pass
             
             # Get product details for this period
-            period_orders = queryset.filter(period=item['period'])
+            period_orders = queryset.filter(
+                order_date__gte=period_start,
+                order_date__lt=period_end
+            )
             
             product_details = []
-            seen_products = set()  # To avoid duplicates
+            product_counts = {}  # To count quantities by product
             
             for order in period_orders:
                 for order_item in order.items.all():
                     product = order_item.product
-                    if product.id not in seen_products:
-                        product_details.append({
-                            'id': product.id,
+                    product_id = product.id
+                    
+                    if product_id in product_counts:
+                        product_counts[product_id]['quantity'] += order_item.quantity
+                    else:
+                        product_counts[product_id] = {
+                            'id': product_id,
                             'name': product.name,
                             'quantity': order_item.quantity
-                        })
-                        seen_products.add(product.id)
+                        }
+            
+            # Convert dictionary to list
+            product_details = list(product_counts.values())
             
             formatted_item = {
                 'period': period_str,
