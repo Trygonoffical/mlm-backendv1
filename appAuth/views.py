@@ -9728,3 +9728,156 @@ class StaffMemberViewSet(viewsets.ModelViewSet):
         ).values_list('department', flat=True).distinct()
         
         return Response(sorted(departments))
+
+
+class CommissionReportView(APIView):
+    """API endpoint for generating commission reports"""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        try:
+            # Extract filters from query params
+            start_date = request.query_params.get('start_date')
+            end_date = request.query_params.get('end_date')
+            commission_type = request.query_params.get('commission_type')
+            is_paid = request.query_params.get('is_paid')
+            member_id = request.query_params.get('member_id')
+
+            # Base queryset
+            queryset = Commission.objects.select_related(
+                'member__user',
+                'from_member__user'
+            )
+
+            # Apply filters
+            if start_date:
+                queryset = queryset.filter(date__date__gte=start_date)
+            if end_date:
+                queryset = queryset.filter(date__date__lte=end_date)
+            if commission_type:
+                queryset = queryset.filter(commission_type=commission_type)
+            if is_paid is not None:
+                is_paid_bool = is_paid.lower() == 'true'
+                queryset = queryset.filter(is_paid=is_paid_bool)
+            if member_id:
+                queryset = queryset.filter(member__member_id=member_id)
+
+            # Calculate summary
+            summary = {
+                'total_commission': queryset.aggregate(total=Sum('amount'))['total'] or Decimal('0.00'),
+                'paid_commission': queryset.filter(is_paid=True).aggregate(total=Sum('amount'))['total'] or Decimal('0.00'),
+                'pending_commission': queryset.filter(is_paid=False).aggregate(total=Sum('amount'))['total'] or Decimal('0.00'),
+                'total_transactions': queryset.count()
+            }
+
+            # Prepare commission data
+            commission_data = []
+            for commission in queryset:
+                commission_data.append({
+                    'date': commission.date,
+                    'member_id': commission.member.member_id,
+                    'member_name': commission.member.user.get_full_name(),
+                    'commission_type': commission.commission_type,
+                    'from_member': commission.from_member.user.get_full_name(),
+                    'amount': float(commission.amount),
+                    'is_paid': commission.is_paid,
+                    'payment_date': commission.payment_date,
+                    'level': commission.level,
+                    'is_first_purchase_bonus': commission.is_first_purchase_bonus
+                })
+
+            return Response({
+                'report_type': 'commissions',
+                'data': commission_data,
+                'summary': {
+                    'total_commission': float(summary['total_commission']),
+                    'paid_commission': float(summary['paid_commission']),
+                    'pending_commission': float(summary['pending_commission']),
+                    'total_transactions': summary['total_transactions']
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Error generating commission report: {str(e)}")
+            return Response({
+                'error': 'Failed to generate commission report'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PayoutReportView(APIView):
+    """API endpoint for generating payout reports"""
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        try:
+            # Extract filters from query params
+            start_date = request.query_params.get('start_date')
+            end_date = request.query_params.get('end_date')
+            payout_status = request.query_params.get('status')
+            member_id = request.query_params.get('member_id')
+            min_amount = request.query_params.get('min_amount')
+            max_amount = request.query_params.get('max_amount')
+
+            # Base queryset
+            queryset = WithdrawalRequest.objects.select_related(
+                'wallet__user__mlm_profile'
+            ).order_by('-created_at')
+
+            # Apply filters
+            if start_date:
+                queryset = queryset.filter(created_at__date__gte=start_date)
+            if end_date:
+                queryset = queryset.filter(created_at__date__lte=end_date)
+            if payout_status:
+                queryset = queryset.filter(status=payout_status)
+            if member_id:
+                queryset = queryset.filter(wallet__user__mlm_profile__member_id=member_id)
+            if min_amount:
+                queryset = queryset.filter(amount__gte=min_amount)
+            if max_amount:
+                queryset = queryset.filter(amount__lte=max_amount)
+
+            # Calculate summary
+            summary = {
+                'total_payouts': queryset.aggregate(total=Sum('amount'))['total'] or Decimal('0.00'),
+                'approved_payouts': queryset.filter(status='APPROVED').aggregate(total=Sum('amount'))['total'] or Decimal('0.00'),
+                'pending_payouts': queryset.filter(status='PENDING').aggregate(total=Sum('amount'))['total'] or Decimal('0.00'),
+                'rejected_payouts': queryset.filter(status='REJECTED').aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            }
+
+            # Prepare payout data
+            payout_data = []
+            for payout in queryset:
+                mlm_member = payout.wallet.user.mlm_profile
+                bank_details = mlm_member.bank_details if hasattr(mlm_member, 'bank_details') else None
+
+                payout_data.append({
+                    'created_at': payout.created_at,
+                    'member_id': mlm_member.member_id,
+                    'member_name': payout.wallet.user.get_full_name(),
+                    'amount': float(payout.amount),
+                    'status': payout.status,
+                    'processed_at': payout.processed_at,
+                    'bank_details': {
+                        'bank_name': bank_details.bank_name if bank_details else None,
+                        'account_number': bank_details.account_number if bank_details else None,
+                        'ifsc_code': bank_details.ifsc_code if bank_details else None
+                    } if bank_details else None,
+                    'rejection_reason': payout.rejection_reason if payout.status == 'REJECTED' else None
+                })
+
+            return Response({
+                'report_type': 'payouts',
+                'data': payout_data,
+                'summary': {
+                    'total_payouts': float(summary['total_payouts']),
+                    'approved_payouts': float(summary['approved_payouts']),
+                    'pending_payouts': float(summary['pending_payouts']),
+                    'rejected_payouts': float(summary['rejected_payouts'])
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Error generating payout report: {str(e)}")
+            return Response({
+                'error': 'Failed to generate payout report'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
