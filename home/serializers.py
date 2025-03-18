@@ -1319,9 +1319,8 @@ class MLMMemberListSerializer(serializers.ModelSerializer):
         ]
 
     def get_withdrawals(self, obj):
-        withdrawals = WalletTransaction.objects.filter(
-            wallet__user=obj.user,
-            transaction_type='WITHDRAWAL'
+        withdrawals = WithdrawalRequest.objects.filter(
+            wallet__user=obj.user
         ).order_by('-created_at')
 
         return [
