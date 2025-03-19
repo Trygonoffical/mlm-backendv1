@@ -228,10 +228,14 @@ QUIXGO_PASSWORD = 'Herbal@1234'  # Replace with your QuixGo account password Tes
 QUIXGO_CUSTOMER_ID = '9y2J'  # This will be obtained after the first login
 
 
+# MSG91_EMAIL_AUTH_KEY = '440929ANN27nHYNBZ67badd81P1'
+# MSG91_EMAIL_SENDER = 'noreply@mail.herbalpowerindia.com'
+# MSG91_EMAIL_SENDER_NAME = 'Herbal Power Marketing Private Limited'
+# MSG91_EMAIL_DOMAIN = 'mail.herbalpowerindia.com'
 MSG91_EMAIL_AUTH_KEY = '440929ANN27nHYNBZ67badd81P1'
-MSG91_EMAIL_SENDER = 'noreply@mail.herbalpowerindia.com'
-MSG91_EMAIL_SENDER_NAME = 'Herbal Power Marketing Private Limited'
 MSG91_EMAIL_DOMAIN = 'mail.herbalpowerindia.com'
+MSG91_FROM_EMAIL = 'noreply@mail.herbalpowerindia.com'
+MSG91_FROM_NAME = 'Herbal Power Marketing Private Limited'
 
 # Email templates
 MSG91_EMAIL_TEMPLATES = {

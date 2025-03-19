@@ -1883,6 +1883,9 @@ class VerifyPaymentView(APIView):
                     # msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
                     # Send order confirmation SMS
                     self.send_order_confirmation_sms(order)
+
+                    # Send order confirmation email
+                    self.send_order_confirmation_email(order)
                     
 
                     # Process BP points and check for position upgrades
@@ -1959,7 +1962,26 @@ class VerifyPaymentView(APIView):
                 
         except Exception as e:
             logger.error(f"Error sending order confirmation SMS: {str(e)}")
-       
+    
+    def send_order_confirmation_email(self, order):
+        """Send order confirmation email using MSG91"""
+        try:
+            # Check if user has email
+            if not order.user or not order.user.email:
+                logger.error(f"No email available for order {order.order_number}")
+                return
+            
+            email_service = MSG91EmailService()
+            # Calculate expected delivery date (e.g., 7 days from now)
+            expected_delivery_date = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime('%d-%m-%Y')
+            # Send confirmation email
+            email_result = email_service.send_order_confirmation_email(order , expected_delivery_date)
+            
+            if not email_result['success']:
+                logger.error(f"Failed to send order confirmation email: {email_result['message']}")
+                
+        except Exception as e:
+            logger.error(f"Error sending order confirmation email: {str(e)}")
 
 class AddressViewSet(viewsets.ModelViewSet):
     serializer_class = AddressSerializer
@@ -5232,8 +5254,27 @@ class MLMMemberRegistrationView(APIView):
                 # Notification.objects.create(...)
                 # Create notification about new member registration and first payment requirement
 
+                # Send welcome email if email is provided
+                if new_user.email:
+                    try:
+                    
+                        email_service = MSG91EmailService()
+                        
+                        # Send welcome email
+                        email_result = email_service.send_welcome_email(
+                            user=new_user,
+                            password=password,
+                        )
+                        
+                        if not email_result['success']:
+                            logger.warning(f"Failed to send welcome email: {email_result['message']}")
+                    except Exception as email_error:
+                        logger.error(f"Error sending welcome email: {str(email_error)}")
+
                 # Initialize MSG91 service
                 msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+
+
 
                 if new_user.phone_number:
                     send_result = msg91_service.send_Onboarding(new_user.phone_number)
