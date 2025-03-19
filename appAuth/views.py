@@ -46,7 +46,7 @@ from django.db import transaction
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
-from utils.email_utils import send_welcome_email
+# from utils.email_utils import send_welcome_email
 from utils.msg91_utils import MSG91Service 
 import string
 from django.core.exceptions import ValidationError
