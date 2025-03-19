@@ -22,7 +22,7 @@ class MSG91EmailService:
         #     'content-type': 'application/json'
         # }
         self.auth_key = auth_key or settings.MSG91_EMAIL_AUTH_KEY
-        self.base_url = "control.msg91.com"
+        self.base_url = "https://control.msg91.com"
         self.api_endpoint = "/api/v5/email/send"
         self.domain = settings.MSG91_EMAIL_DOMAIN or "mail.herbalpowerindia.com"
         self.from_email = settings.MSG91_FROM_EMAIL or "noreply@mail.herbalpowerindia.com"
