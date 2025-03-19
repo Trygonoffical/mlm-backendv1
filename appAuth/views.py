@@ -1960,7 +1960,7 @@ class VerifyPaymentView(APIView):
             # Send confirmation SMS
             send_result = msg91_service.send_order_confirmation(
                 phone_number=phone_number,
-                # order_number=order.order_number,
+                order_number=order.order_number,
                 date=expected_delivery_date
             )
             
@@ -2360,7 +2360,12 @@ class OrderProcessView(APIView):
                         product.save()
 
                 # Send order confirmation for COD
-                self.send_cod_order_confirmation(order)
+                # self.send_cod_order_confirmation(order)
+                # Send order confirmation SMS
+                self.send_order_confirmation_sms(order)
+
+                # Send order confirmation email
+                self.send_order_confirmation_email(order)
 
             # If it's an online payment, create Razorpay order
             razorpay_order = None
@@ -2421,43 +2426,92 @@ class OrderProcessView(APIView):
                 'message': 'An unexpected error occurred'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-    def send_cod_order_confirmation(self, order):
-        """Send confirmation SMS and email for COD orders"""
+    def send_order_confirmation_sms(self, order):
+        """Send order confirmation SMS using MSG91"""
         try:
-            # Send SMS confirmation if phone number is available
-            if order.user.phone_number:
-                msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
-                message = f"Thank you for your COD order #{order.order_number}. Your order has been confirmed and will be shipped soon. Total: ₹{order.final_amount}"
-                
-                msg91_service.send_transactional_sms(
-                    order.user.phone_number, 
-                    message
-                )
+            # Check if user has phone number
+            if not order.user or not order.user.phone_number:
+                logger.error(f"No phone number available for order {order.order_number}")
+                return
             
-            # Send email confirmation if email is available
-            if order.user.email:
-                subject = f"Your COD Order #{order.order_number} is Confirmed"
-                context = {
-                    'order': order,
-                    'user': order.user,
-                    'items': order.items.all(),
-                    'is_cod': True
-                }
-                
-                html_message = render_to_string('emails/order_confirmation.html', context)
-                plain_message = strip_tags(html_message)
-                
-                send_mail(
-                    subject,
-                    plain_message,
-                    settings.DEFAULT_FROM_EMAIL,
-                    [order.user.email],
-                    html_message=html_message,
-                    fail_silently=True
-                )
+            # Initialize MSG91 service
+            msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+            
+            # Get user's phone number
+            phone_number = order.user.phone_number
+            
+            # Calculate expected delivery date (e.g., 7 days from now)
+            expected_delivery_date = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime('%d-%m-%Y')
+            
+            # Send confirmation SMS
+            send_result = msg91_service.send_order_confirmation(
+                phone_number=phone_number,
+                order_number=order.order_number,
+                date=expected_delivery_date
+            )
+            
+            if not send_result['success']:
+                logger.error(f"Failed to send order confirmation SMS: {send_result['message']}")
                 
         except Exception as e:
-            logger.error(f"Error sending COD order confirmation: {str(e)}")
+            logger.error(f"Error sending order confirmation SMS: {str(e)}")
+    
+    def send_order_confirmation_email(self, order):
+        """Send order confirmation email using MSG91"""
+        try:
+            # Check if user has email
+            if not order.user or not order.user.email:
+                logger.error(f"No email available for order {order.order_number}")
+                return
+            
+            email_service = MSG91EmailService()
+            # Calculate expected delivery date (e.g., 7 days from now)
+            expected_delivery_date = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime('%d-%m-%Y')
+            # Send confirmation email
+            email_result = email_service.send_order_confirmation_email(order , expected_delivery_date)
+            
+            if not email_result['success']:
+                logger.error(f"Failed to send order confirmation email: {email_result['message']}")
+                
+        except Exception as e:
+            logger.error(f"Error sending order confirmation email: {str(e)}")
+    # def send_cod_order_confirmation(self, order):
+    #     """Send confirmation SMS and email for COD orders"""
+    #     try:
+    #         # Send SMS confirmation if phone number is available
+    #         if order.user.phone_number:
+    #             msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+    #             message = f"Thank you for your COD order #{order.order_number}. Your order has been confirmed and will be shipped soon. Total: ₹{order.final_amount}"
+                
+    #             msg91_service.send_transactional_sms(
+    #                 order.user.phone_number, 
+    #                 message
+    #             )
+            
+    #         # Send email confirmation if email is available
+    #         if order.user.email:
+    #             subject = f"Your COD Order #{order.order_number} is Confirmed"
+    #             context = {
+    #                 'order': order,
+    #                 'user': order.user,
+    #                 'items': order.items.all(),
+    #                 'is_cod': True
+    #             }
+                
+    #             html_message = render_to_string('emails/order_confirmation.html', context)
+    #             plain_message = strip_tags(html_message)
+                
+    #             send_mail(
+    #                 subject,
+    #                 plain_message,
+    #                 settings.DEFAULT_FROM_EMAIL,
+    #                 [order.user.email],
+    #                 html_message=html_message,
+    #                 fail_silently=True
+    #             )
+                
+    #     except Exception as e:
+    #         logger.error(f"Error sending COD order confirmation: {str(e)}")
             # Don't raise exception as this shouldn't block order creation
     # def post(self, request):
     #     try:
