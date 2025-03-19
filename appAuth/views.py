@@ -1880,7 +1880,7 @@ class VerifyPaymentView(APIView):
                     order.payment_id = payment_id
                     order.save()
 
-                    msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+                    # msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
                     # Send order confirmation SMS
                     self.send_order_confirmation_sms(order)
                     
@@ -1944,13 +1944,13 @@ class VerifyPaymentView(APIView):
             # Get user's phone number
             phone_number = order.user.phone_number
             
-            # Calculate expected delivery date (e.g., 5 days from now)
-            expected_delivery_date = (datetime.datetime.now() + datetime.timedelta(days=5)).strftime('%d-%m-%Y')
+            # Calculate expected delivery date (e.g., 7 days from now)
+            expected_delivery_date = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime('%d-%m-%Y')
             
             # Send confirmation SMS
             send_result = msg91_service.send_order_confirmation(
                 phone_number=phone_number,
-                order_number=order.order_number,
+                # order_number=order.order_number,
                 date=expected_delivery_date
             )
             

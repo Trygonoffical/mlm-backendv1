@@ -92,7 +92,7 @@ class MSG91Service:
                 'message': f'Error sending OTP: {str(e)}'
             }
     
-    def send_order_confirmation(self, phone_number, order_number ,date):
+    def send_order_confirmation(self, phone_number ,date):
         """
         Send OTP using MSG91 Flow API
         
@@ -124,8 +124,8 @@ class MSG91Service:
                 "recipients": [
                     {
                         "mobiles": mobile,
-                        "number": order_number,  # This will replace {{otp}} in your template
-                        "date": date  # Additional variables if needed
+                        "date": date,  # This will replace {{otp}} in your template
+                        # "date": "VALUE 2"  # Additional variables if needed
                     }
                 ]
             }
