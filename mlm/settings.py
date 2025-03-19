@@ -106,7 +106,7 @@ DATABASES = {
 
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'mlmv6',
+        'NAME': 'mlmv8',
         'USER': 'postgres',
         'PASSWORD': 'Trygon@123',
         'HOST': 'localhost',
