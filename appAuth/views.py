@@ -679,7 +679,25 @@ class MLMMemberViewSet(viewsets.ModelViewSet):
         try:
             # Perform the creation
             member = serializer.save()
-            
+            # Initialize MSG91 service
+            msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+            # Send welcome email if email is provided
+            if member.user.phone_number:
+                # Send OTP via MSG91
+                send_result = msg91_service.send_Onboarding(member.user.phone_number)
+
+                # Check if OTP sending was successful
+                if not send_result['success']:
+                    return Response({
+                        'status': False,
+                        'message': f'Failed to send OTP: {send_result["message"]}'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+                return Response({
+                    'status': True,
+                    'message': 'OTP sent successfully',
+                })
+
             # Send welcome email if email is provided
             if member.user.email:
                 # Get the password from the request data
@@ -1789,35 +1807,35 @@ class CreateOrderView(APIView):
     
 #     if not result['success']:
 #         logger.error(f"Failed to send order confirmation SMS: {result['message']}")
-def send_order_confirmation_sms(order):
-    try:
-        msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+# def send_order_confirmation_sms(order):
+#     try:
+#         msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
         
-        # Use a default delivery date if not specified
-        expected_delivery = getattr(order, 'expected_delivery_date', 'soon')
+#         # Use a default delivery date if not specified
+#         expected_delivery = getattr(order, 'expected_delivery_date', 'soon')
         
-        # Ensure user and phone number exist
-        if not hasattr(order, 'user') or not order.user:
-            logger.error(f"No user associated with order {order.order_number}")
-            return
+#         # Ensure user and phone number exist
+#         if not hasattr(order, 'user') or not order.user:
+#             logger.error(f"No user associated with order {order.order_number}")
+#             return
         
-        phone_number = order.user.phone_number
-        if not phone_number:
-            logger.error(f"No phone number for user in order {order.order_number}")
-            return
+#         phone_number = order.user.phone_number
+#         if not phone_number:
+#             logger.error(f"No phone number for user in order {order.order_number}")
+#             return
         
-        message = f"Dear User, your order {order.order_number} has been confirmed. Delivery by {expected_delivery}. For details, visit https://www.yourwebsite.com/OrderTracking"
+#         message = f"Dear User, your order {order.order_number} has been confirmed. Delivery by {expected_delivery}. For details, visit https://www.yourwebsite.com/OrderTracking"
         
-        result = msg91_service.send_transactional_sms(
-            phone_number, 
-            message
-        )
+#         result = msg91_service.send_transactional_sms(
+#             phone_number, 
+#             message
+#         )
         
-        if not result['success']:
-            logger.error(f"Failed to send order confirmation SMS for order {order.order_number}: {result['message']}")
+#         if not result['success']:
+#             logger.error(f"Failed to send order confirmation SMS for order {order.order_number}: {result['message']}")
     
-    except Exception as e:
-        logger.error(f"Unexpected error sending order confirmation SMS: {str(e)}")
+#     except Exception as e:
+#         logger.error(f"Unexpected error sending order confirmation SMS: {str(e)}")
 class VerifyPaymentView(APIView):
     authentication_classes = [JWTAuthentication]
     permission_classes = [IsAuthenticated]
@@ -1862,8 +1880,10 @@ class VerifyPaymentView(APIView):
                     order.payment_id = payment_id
                     order.save()
 
+                    msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
                     # Send order confirmation SMS
-                    send_order_confirmation_sms(order)
+                    self.send_order_confirmation_sms(order)
+                    
 
                     # Process BP points and check for position upgrades
                     from home.utils import update_bp_points_on_order
@@ -5211,6 +5231,25 @@ class MLMMemberRegistrationView(APIView):
                 # Create notification about new member registration if needed
                 # Notification.objects.create(...)
                 # Create notification about new member registration and first payment requirement
+
+                # Initialize MSG91 service
+                msg91_service = MSG91Service(settings.MSG91_AUTH_KEY)
+
+                if new_user.phone_number:
+                    send_result = msg91_service.send_Onboarding(new_user.phone_number)
+
+                    # Check if OTP sending was successful
+                    if not send_result['success']:
+                        return Response({
+                            'status': False,
+                            'message': f'Failed to send OTP: {send_result["message"]}'
+                        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    
+                    return Response({
+                        'status': True,
+                        'message': 'OTP sent successfully',
+                    })
+
                 Notification.objects.create(
                     title='New Member Registration',
                     message=f"You've been registered as a new MLM member. Please complete your first payment of at least ₹{position.monthly_quota} to activate your account.",
