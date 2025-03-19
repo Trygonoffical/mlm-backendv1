@@ -52,8 +52,8 @@ import string
 from django.core.exceptions import ValidationError
 from .services import QuixGoShippingService
 from home.utils import calculate_monthly_commissions
-from utils.msg91_email_utils import MSG91EmailService
 
+from utils.msg91_email_utils import MSG91EmailService
 
 logger = logging.getLogger(__name__)
 
@@ -703,14 +703,21 @@ class MLMMemberViewSet(viewsets.ModelViewSet):
                 # Get the password from the request data
                 password = request.data.get('password')
                 
+                try:
+                    email_service = MSG91EmailService()
+                    
+                    # Send welcome email
+                    email_result = email_service.send_welcome_email(
+                        user=member.user,
+                        password=password,
+                    )
+                    
+                    if not email_result['success']:
+                        logger.warning(f"Failed to send welcome email: {email_result['message']}")
+                except Exception as email_error:
+                    logger.error(f"Error sending welcome email: {str(email_error)}")
                 # Find the sponsor if applicable
-                sponsor = None
-                if 'sponsor_id' in request.data:
-                    try:
-                        sponsor = MLMMember.objects.get(member_id=request.data.get('sponsor_id'))
-                    except MLMMember.DoesNotExist:
-                        # Log that sponsor was not found, but continue
-                        logger.warning(f"Sponsor with ID {request.data.get('sponsor_id')} not found")
+               
                 
                 # Send welcome email
                 # send_welcome_email(
@@ -5254,6 +5261,23 @@ class MLMMemberRegistrationView(APIView):
                 # Notification.objects.create(...)
                 # Create notification about new member registration and first payment requirement
 
+                
+
+                Notification.objects.create(
+                    title='New Member Registration',
+                    message=f"You've been registered as a new MLM member. Please complete your first payment of at least ₹{position.monthly_quota} to activate your account.",
+                    notification_type='INDIVIDUAL',
+                    recipient=new_mlm_member
+                )
+
+                # Create notification for sponsor
+                Notification.objects.create(
+                    title='New Downline Member',
+                    message=f"You've successfully registered {new_user.get_full_name()} as your downline. You'll receive a ₹1000 bonus when they complete their first payment.",
+                    notification_type='INDIVIDUAL',
+                    recipient=current_member
+                )
+
                 # Send welcome email if email is provided
                 if new_user.email:
                     try:
@@ -5290,21 +5314,6 @@ class MLMMemberRegistrationView(APIView):
                         'status': True,
                         'message': 'OTP sent successfully',
                     })
-
-                Notification.objects.create(
-                    title='New Member Registration',
-                    message=f"You've been registered as a new MLM member. Please complete your first payment of at least ₹{position.monthly_quota} to activate your account.",
-                    notification_type='INDIVIDUAL',
-                    recipient=new_mlm_member
-                )
-
-                # Create notification for sponsor
-                Notification.objects.create(
-                    title='New Downline Member',
-                    message=f"You've successfully registered {new_user.get_full_name()} as your downline. You'll receive a ₹1000 bonus when they complete their first payment.",
-                    notification_type='INDIVIDUAL',
-                    recipient=current_member
-                )
 
                 return Response({
                     'status': 'success',
