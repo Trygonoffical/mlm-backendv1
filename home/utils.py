@@ -1190,7 +1190,8 @@ def process_first_payment(order):
                 # Mark first payment as complete
                 member.first_payment_complete = True
                 member.first_payment_amount = order.final_amount
-                member.save(update_fields=['first_payment_complete', 'first_payment_amount'])
+                member.first_purchase_bonus_received = True
+                member.save(update_fields=['first_payment_complete', 'first_payment_amount', 'first_purchase_bonus_received'])
                 
                 logger.info(f"First payment completed for member {member.member_id}: {order.final_amount} >= {monthly_quota}")
                 
