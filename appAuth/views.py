@@ -7273,6 +7273,9 @@ class ShipmentViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
+
+            logger.info(f"Order INformation - {request.data}")
+
             # Get the order and pickup address
             order = get_object_or_404(Order, id=serializer.validated_data['order'].id)
             pickup_address = get_object_or_404(PickupAddress, id=serializer.validated_data['pickup_address'].id)

@@ -1943,12 +1943,19 @@ class ShipmentSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     status_updates = ShipmentStatusUpdateSerializer(many=True, read_only=True)
     tracking_link = serializers.SerializerMethodField()
+    # order = OrderMinimalSerializer(read_only=True)
+    # order = serializers.PrimaryKeyRelatedField(queryset=Order.objects.all(), required=True)
+
+    # Accept order_id as input
+    order_id = serializers.PrimaryKeyRelatedField(queryset=Order.objects.all(), source="order", write_only=True)
+    
+    # Show full order details in response
     order = OrderMinimalSerializer(read_only=True)
     
     class Meta:
         model = Shipment
         fields = [
-            'id', 'order', 'pickup_address', 'awb_number', 'shipment_id',
+            'id', 'order_id', 'order', 'pickup_address', 'awb_number', 'shipment_id',
             'courier_name', 'service_type', 'status', 'status_display', 
             'status_details', 'tracking_url', 'tracking_link', 'weight', 
             'length', 'width', 'height', 'is_cod', 'cod_amount', 
@@ -1957,7 +1964,7 @@ class ShipmentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'awb_number', 'shipment_id', 'status_details', 'tracking_url',
-            'shipping_charge', 'created_at', 'updated_at', 'status_updates'
+            'shipping_charge', 'created_at', 'updated_at', 'status_updates', 
         ]
         
     def get_tracking_link(self, obj):
